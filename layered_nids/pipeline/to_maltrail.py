@@ -5,7 +5,7 @@
 Maltrail's log line:  "<time>" <sensor> <src_ip> <src_port> <dst_ip> <dst_port> <proto> <type> <trail> "<info>" <reference>
 Our alerts are machine-learning findings about a HOST, not network events, so some fields are placeholders: the source is the host, the
 ports are 0, the destination is 0.0.0.0 and the protocol column says TCP only because the dashboard needs a value. The trail is the host, so
-the dashboard groups alerts per host. The reference is "(layered-nids)" so they are easy to tell apart from Maltrail's own events.
+the dashboard groups alerts per host. The reference is "(nids)" so they are easy to tell apart from Maltrail's own events.
 Times are UTC; the log file is named after the alert's date, as Maltrail does.
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-SENSOR = "layered-nids"
+SENSOR = "nids"
 
 
 def alert_to_line(a: dict, sensor: str = SENSOR) -> str:
@@ -24,7 +24,7 @@ def alert_to_line(a: dict, sensor: str = SENSOR) -> str:
     layers = "+".join(sorted(a.get("layers") or {})) or "fusion"
     reason = (a.get("reasons") or [layers])[0].replace('"', "'")
     info = f'{a["severity"]} ML alert ({layers}), p={a["probability"]:.9f}: {reason}'
-    return f'"{when.strftime("%Y-%m-%d %H:%M:%S.%f")}" {sensor} {a["host"]} 0 0.0.0.0 0 TCP IP {a["host"]} "{info}" (layered-nids)'
+    return f'"{when.strftime("%Y-%m-%d %H:%M:%S.%f")}" {sensor} {a["host"]} 0 0.0.0.0 0 TCP IP {a["host"]} "{info}" (nids)'
 
 
 def write_logs(alerts_path, out_dir) -> dict:

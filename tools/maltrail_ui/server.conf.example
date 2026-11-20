@@ -6,7 +6,8 @@ UPDATE_PERIOD 999999999
 DISABLE_CHECK_SUDO true
 MONITOR_INTERFACE any
 CAPTURE_BUFFER 10MB
-SENSOR_NAME layered-nids
+SENSOR_NAME nids
+HEADER_LOGO NIDS
 LOG_DIR logs
 # USERS: create your own login. Generate the value with:   python core/password.py   (prints the field for a password you type)
 # then add (indented) under USERS:

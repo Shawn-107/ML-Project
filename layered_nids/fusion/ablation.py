@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -109,11 +110,15 @@ def main(argv=None):
     ap.add_argument("--n-calib", type=int, default=20)
     ap.add_argument("--n-train", type=int, default=20)
     ap.add_argument("--hours", type=float, default=2.0)
+    ap.add_argument("--told-measured-fpr", action="store_true",
+                    help="FAIR BASELINE: tell the evidence rule each layer's locally measured false-alarm rate instead of the nominal 1%%/3%%")
     ap.add_argument("--cache", default=str(REPORTS / "flows" / "score_cache.npz"))
     ap.add_argument("--out", default=str(REPORTS / "fusion" / "ablation.json"))
     a = ap.parse_args(argv)
     t0 = time.time()
     pools = {"dga": dga_pool(), "flows": flow_pool(a.flow_model, Path(a.cache))}
+    if a.told_measured_fpr:
+        pools = {k: replace(p, fpr=max(p.measured_fpr, 1e-4)) for k, p in pools.items()}    # same thresholds and scores; only the rate the rule assumes changes
     pool_info = {k: {"threshold": p.threshold, "nominal_fpr": p.fpr, "measured_fpr_on_held_out": p.measured_fpr,
                      "measured_recall_on_held_out": p.measured_recall} for k, p in pools.items()}
     print("layer pools:", json.dumps(pool_info), flush=True)
@@ -134,7 +139,7 @@ def main(argv=None):
             print(f"{lname:10s} {mname:26s} param {param:<10.6g} detect {res['detection_rate']['mean']:.2f}+-{res['detection_rate']['std']:.2f} "
                   f"ttd {res['median_time_to_detect_s']['mean']:6.0f}s  false alerts/host-day {res['benign_false_alerts_per_host_day']['mean']:.2f}",
                   flush=True)
-    out = {"protocol": __doc__, "flow_model": a.flow_model, "budget_false_alerts_per_host_day": a.budget,
+    out = {"protocol": __doc__, "flow_model": a.flow_model, "told_measured_fpr": a.told_measured_fpr, "budget_false_alerts_per_host_day": a.budget,
            "scenarios": {"calibration": a.n_calib, "train": a.n_train, "test": a.n_test, "hours": a.hours,
                          "hosts": "40 benign + 10 attackers"},
            "pools": pool_info, "results": rows, "wall_seconds": round(time.time() - t0, 1),

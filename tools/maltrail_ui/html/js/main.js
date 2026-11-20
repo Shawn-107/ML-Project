@@ -858,7 +858,7 @@
       setList(t.dstS).forEach(function (ip) { if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) set[ip] = 1; });
     });
     var list = Object.keys(set).sort();
-    return "# Maltrail IOC export · " + list.length + " indicators (defanged) · " + (currentDate() || todayStr()) +
+    return "# NIDS IOC export · " + list.length + " indicators (defanged) · " + (currentDate() || todayStr()) +
       "\n" + list.map(defang).join("\n");
   }
   function download(name, text, mime) {
@@ -870,9 +870,9 @@
   }
   function exportAs(kind) {
     var date = currentDate() || todayStr();
-    if (kind === "csv") download("maltrail-threats-" + date + ".csv", buildCSV(), "text/csv");
-    else if (kind === "json") download("maltrail-threats-" + date + ".json", buildJSON(), "application/json");
-    else if (kind === "ioc") download("maltrail-iocs-" + date + ".txt", buildIOC(), "text/plain");
+    if (kind === "csv") download("nids-threats-" + date + ".csv", buildCSV(), "text/csv");
+    else if (kind === "json") download("nids-threats-" + date + ".json", buildJSON(), "application/json");
+    else if (kind === "ioc") download("nids-iocs-" + date + ".txt", buildIOC(), "text/plain");
   }
   // ===== Saved views / filter presets (localStorage) =====
   function loadViews() { var a = lsGet("mt_views", null); return Array.isArray(a) ? a : []; }
@@ -949,7 +949,7 @@
     if (!getMuted()) {   // user can mute the new-threat beep (the desktop notification, if granted, still shows)
       try { var C = window.AudioContext || window.webkitAudioContext; if (C) { var ac = state._ac || (state._ac = new C()); if (ac.state === "suspended") ac.resume(); var o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.value = 880; g.gain.value = 0.05; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.13); } } catch (e) { }
     }
-    try { if ("Notification" in window && Notification.permission === "granted") new Notification("Maltrail \u00b7 " + list.length + " new high-severity", { body: list.slice(0, 3).map(function (t) { return t.src + " \u2192 " + t.trail; }).join("\n") }); } catch (e) { }
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification("NIDS \u00b7 " + list.length + " new high-severity", { body: list.slice(0, 3).map(function (t) { return t.src + " \u2192 " + t.trail; }).join("\n") }); } catch (e) { }
   }
   function clearNew() { state.newCount = 0; state.newUids = {}; refresh(); }
   // "New" means "appeared on the day being viewed since it was first loaded". The seen-set used to
@@ -1832,7 +1832,7 @@
                                                            : total + " of " + state.all.length)
                                + (state.streaming ? " · streaming…" : "")
                                + (_dropped ? " · +" + fmtK(_dropped) + " ungrouped (threat limit)" : "");
-    var _tbase = "Maltrail" + (DEMO ? " (demo)" : "");
+    var _tbase = "NIDS" + (DEMO ? " (demo)" : "");
     document.title = state.all.length ? _tbase + " \u00b7 " + (total === state.all.length ? state.all.length + " threats" : total + "/" + state.all.length) : _tbase;
     renderHiddenInfo(cnt);
     state._pageRows = pageRows;
@@ -3238,7 +3238,7 @@
   function showLogin() {
     if (document.getElementById("login_overlay")) return;
     var o = document.createElement("div"); o.id = "login_overlay"; o.className = "modal-overlay";
-    o.innerHTML = '<div class="modal"><div class="modal-h">Sign in to Maltrail</div>' +
+    o.innerHTML = '<div class="modal"><div class="modal-h">Sign in to NIDS</div>' +
       '<label for="li_user">Username</label><input id="li_user" autocomplete="username">' +
       '<label for="li_pass">Password</label><input id="li_pass" type="password" autocomplete="current-password">' +
       '<div id="li_err" class="modal-err"></div>' +
@@ -3561,7 +3561,7 @@
   function boot() {
     // <!LOGO!> is server-substituted to the maltrail logo (or config.HEADER_LOGO). When unsubstituted
     // (demo / file:// / artifact — no server), the token becomes a bogus comment -> inject the default logo.
-    var _bl = document.querySelector(".brandlogo"); if (_bl && !_bl.querySelector("img")) _bl.innerHTML = '<img src="images/mlogo.png" alt="" style="width:24px">altrail';
+    var _bl = document.querySelector(".brandlogo"); if (_bl && !_bl.textContent.trim()) _bl.textContent = 'NIDS';
     loadPrefs(); applyTheme(getTheme()); applyScale(getScaleIdx()); applyView(); applyMuted(getMuted()); migrateLegacy(); parseHash(); wire(); applyPrefsUI();
     checkSensors();
     setInterval(function () { refreshRelTimes(); checkSensors(); }, 30000);   // keep "Xm ago" labels current between renders, and the silent-sensor marker
@@ -3576,7 +3576,7 @@
     var ve = document.querySelector(".ver");
     if (ve && DEMO && !ve.textContent.trim()) ve.textContent = "demo";
     if (DEMO) {
-      document.title = "Maltrail (demo)";
+      document.title = "NIDS (demo)";
       // No server, so nothing can be signed in to: the button would open a password prompt that
       // posts nowhere. Hidden here rather than in checkAuth(), which only runs on the server path.
       var dl = document.getElementById("login_link"); if (dl) dl.style.display = "none";

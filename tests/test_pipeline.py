@@ -194,7 +194,7 @@ def test_alerts_written_in_maltrail_format_read_back_through_our_own_maltrail_pa
     events, bad = parse_log(alert_to_line(a))
     assert bad == 0 and len(events) == 1
     e = events[0]
-    assert e["src"] == "192.168.2.110" and e["ref"] == "(layered-nids)" and e["sensor"] == "layered-nids" and "high ML alert (packets+rules)" in e["info"]
+    assert e["src"] == "192.168.2.110" and e["ref"] == "(nids)" and e["sensor"] == "nids" and "high ML alert (packets+rules)" in e["info"]
     ev = events_to_evidence(events)[0]
     assert ev.host == "192.168.2.110" and ev.layer == "rules"                          # a reader of Maltrail logs sees it as a normal event
     src = tmp_path / "alerts.jsonl"
