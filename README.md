@@ -4,7 +4,7 @@ A network intrusion detection system built around machine learning, combined at 
 the real Maltrail sensor (blocklists + heuristics), the real Kitsune autoencoder ensemble (vendored, MIT), and our own ML layers
 (DGA domain classifier, UNSW-NB15 / NetFlow flow classifiers, learned fusion). MSc AI/ML coursework (Advanced Machine Learning, MAI511-2).
 
-Start with `CLAUDE.md` (full project brief, measured results and honest limits), then `reports/` (`repo_evaluation.md`, `pipeline/REPORT.md`, `dga/`, `flows/`, `csv/`, `fusion/`).
+Final report: `reports/FINAL_REPORT.md`. Project brief and details: `CLAUDE.md` (full project brief, measured results and honest limits); reports in `reports/` (`repo_evaluation.md`, `pipeline/REPORT.md`, `dga/`, `flows/`, `csv/`, `fusion/`).
 
 ## Run (Windows, Python 3.13 venv with `requirements-313.txt`)
 - Tests: `python -m pytest tests`
