@@ -1,0 +1,35 @@
+{
+  "trained_on": {
+    "rows": 73471,
+    "source": "UNSW-NB15 official training split, cleaned (legacy nids.data)"
+  },
+  "thresholds": {
+    "fpr_1pct": 0.8980083177936269,
+    "fpr_3pct": 0.771312900459454
+  },
+  "official_test_cleaned": {
+    "auc_test": 0.9572853592583971,
+    "fpr_1pct": {
+      "threshold": 0.8980083177936269,
+      "accuracy": 0.8897074524877215,
+      "recall": 0.7201944935589796,
+      "false_alarm_rate": 0.02368200296831645,
+      "balanced_accuracy": 0.8482562452953316,
+      "precision": 0.9395337342449954
+    },
+    "fpr_3pct": {
+      "threshold": 0.771312900459454,
+      "accuracy": 0.8907751441383729,
+      "recall": 0.8141576155594847,
+      "false_alarm_rate": 0.07007807962831515,
+      "balanced_accuracy": 0.8720397679655848,
+      "precision": 0.8558247593760372
+    }
+  },
+  "kind": "unsw34",
+  "sha256": "dae9e7c5b5b74f50835e70ae2c32dbd9e2836745a7725cc0e680a7dc49a14eca",
+  "sklearn": "1.6.1",
+  "numpy": "2.2.6",
+  "pandas": "2.2.3",
+  "trained_at": "2026-11-20T19:39:17"
+}

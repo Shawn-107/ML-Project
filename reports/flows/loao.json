@@ -1,0 +1,595 @@
+{
+ "protocol": "Leave-one-attack-out (LOAO) for the flow classifier and novelty options, one protocol for everything.\n\n   python -m layered_nids.flows.loao [--attacks Fuzzers,Reconnaissance] -> reports/flows/loao.json\n\nFor each attack family A: refit the preprocessor and every model WITHOUT any A flow (train and validation), set\nthresholds on validation Normal flows without A, then measure on the official test set how many A flows are caught and\nhow many Normal flows are falsely flagged. Single seed (each fold already retrains ~8 models): the spread across\nfamilies is NOT a repeat-run spread, and seed variance of LOAO is untested.\n\nClassifiers: legacy blend (ANN 2 seeds + forest, 0.5/0.5), gradient boosting, mean(forest, gradient boosting).\nNovelty detectors (fitted on Normal flows only, threshold at 5% validation false alarms): legacy autoencoder,\nisolation forest, K-Means distance (k by silhouette).\nCombinations with the gradient-boosting classifier: OR (flag if either flags) and GATED (flag if the classifier flags,\nor if novelty flags AND the classifier score is above its 15%-false-alarm level, i.e. not clearly normal).\n",
+ "seed": 0,
+ "ann_seeds": 2,
+ "folds": {
+  "Analysis": {
+   "n_attack_test": 224,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.9955357142857143,
+     "false_alarm": 0.07359488933341937
+    },
+    "gb": {
+     "detect": 0.8839285714285714,
+     "false_alarm": 0.06749693489062399
+    },
+    "rf_gb_mean": {
+     "detect": 0.8973214285714286,
+     "false_alarm": 0.07436923275472672
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.7678571428571429,
+     "false_alarm": 0.08346776795508808
+    },
+    "isoforest": {
+     "detect": 0.7455357142857143,
+     "false_alarm": 0.05726914886752275
+    },
+    "kmeans": {
+     "detect": 0.35267857142857145,
+     "false_alarm": 0.04855778537781506
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.8973214285714286,
+     "false_alarm": 0.1348325482351423
+    },
+    "autoencoder_gated": {
+     "detect": 0.8973214285714286,
+     "false_alarm": 0.08979157256243143
+    },
+    "isoforest_or": {
+     "detect": 0.8839285714285714,
+     "false_alarm": 0.11331225398464219
+    },
+    "isoforest_gated": {
+     "detect": 0.8839285714285714,
+     "false_alarm": 0.0789185003549074
+    },
+    "kmeans_or": {
+     "detect": 0.8839285714285714,
+     "false_alarm": 0.11421565464283409
+    },
+    "kmeans_gated": {
+     "detect": 0.8839285714285714,
+     "false_alarm": 0.07291733883977544
+    }
+   },
+   "kmeans_k": 4
+  },
+  "Backdoor": {
+   "n_attack_test": 68,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.7647058823529411,
+     "false_alarm": 0.07833774278892688
+    },
+    "gb": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.07130412337871846
+    },
+    "rf_gb_mean": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.07440149706394786
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.39705882352941174,
+     "false_alarm": 0.08469381170549138
+    },
+    "isoforest": {
+     "detect": 0.2647058823529412,
+     "false_alarm": 0.05784990643350326
+    },
+    "kmeans": {
+     "detect": 0.17647058823529413,
+     "false_alarm": 0.07749887074917726
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.13999483771052462
+    },
+    "autoencoder_gated": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.09637349164354392
+    },
+    "isoforest_or": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.11689359230818869
+    },
+    "isoforest_gated": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.08459701877782796
+    },
+    "kmeans_or": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.143092211395754
+    },
+    "kmeans_gated": {
+     "detect": 0.9117647058823529,
+     "false_alarm": 0.08953345808866232
+    }
+   },
+   "kmeans_k": 16
+  },
+  "DoS": {
+   "n_attack_test": 1162,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.8209982788296041,
+     "false_alarm": 0.07482093308382268
+    },
+    "gb": {
+     "detect": 0.8846815834767642,
+     "false_alarm": 0.0676582564367297
+    },
+    "rf_gb_mean": {
+     "detect": 0.8820998278829604,
+     "false_alarm": 0.07194940956314125
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.5120481927710844,
+     "false_alarm": 0.08782344969994192
+    },
+    "isoforest": {
+     "detect": 0.19965576592082615,
+     "false_alarm": 0.05672065561076337
+    },
+    "kmeans": {
+     "detect": 0.11962134251290878,
+     "false_alarm": 0.06459314706072143
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.9216867469879518,
+     "false_alarm": 0.13889785119700587
+    },
+    "autoencoder_gated": {
+     "detect": 0.9087779690189329,
+     "false_alarm": 0.09340517519519907
+    },
+    "isoforest_or": {
+     "detect": 0.9061962134251291,
+     "false_alarm": 0.11244111763567143
+    },
+    "isoforest_gated": {
+     "detect": 0.9001721170395869,
+     "false_alarm": 0.08088662321739691
+    },
+    "kmeans_or": {
+     "detect": 0.891566265060241,
+     "false_alarm": 0.12570174872555978
+    },
+    "kmeans_gated": {
+     "detect": 0.8898450946643718,
+     "false_alarm": 0.07788604245983094
+    }
+   },
+   "kmeans_k": 16
+  },
+  "Exploits": {
+   "n_attack_test": 7048,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.7893019296254257,
+     "false_alarm": 0.07562754081435116
+    },
+    "gb": {
+     "detect": 0.8686152099886493,
+     "false_alarm": 0.07140091630638189
+    },
+    "rf_gb_mean": {
+     "detect": 0.8595346197502838,
+     "false_alarm": 0.06936826482545008
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.6145005675368899,
+     "false_alarm": 0.09143705233270956
+    },
+    "isoforest": {
+     "detect": 0.14614074914869465,
+     "false_alarm": 0.05781764212428212
+    },
+    "kmeans": {
+     "detect": 0.0988933030646992,
+     "false_alarm": 0.06539975479124992
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.925794551645857,
+     "false_alarm": 0.14660902110085824
+    },
+    "autoencoder_gated": {
+     "detect": 0.9144438138479001,
+     "false_alarm": 0.09266309608311286
+    },
+    "isoforest_or": {
+     "detect": 0.876844494892168,
+     "false_alarm": 0.11611924888688133
+    },
+    "isoforest_gated": {
+     "detect": 0.875,
+     "false_alarm": 0.0837258824288572
+    },
+    "kmeans_or": {
+     "detect": 0.8738649262202043,
+     "false_alarm": 0.13105762405626895
+    },
+    "kmeans_gated": {
+     "detect": 0.8724460839954598,
+     "false_alarm": 0.08130605923727173
+    }
+   },
+   "kmeans_k": 16
+  },
+  "Fuzzers": {
+   "n_attack_test": 3909,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.1639805576873881,
+     "false_alarm": 0.09337291088597793
+    },
+    "gb": {
+     "detect": 0.15656178050652342,
+     "false_alarm": 0.08430663999483771
+    },
+    "rf_gb_mean": {
+     "detect": 0.15630596060373497,
+     "false_alarm": 0.08514551203458734
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.20209772320286518,
+     "false_alarm": 0.08614570562044267
+    },
+    "isoforest": {
+     "detect": 0.10616525965720133,
+     "false_alarm": 0.05723688455830161
+    },
+    "kmeans": {
+     "detect": 0.10667689946277821,
+     "false_alarm": 0.08059624443440666
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.31619339984650807,
+     "false_alarm": 0.16122475317803445
+    },
+    "autoencoder_gated": {
+     "detect": 0.28293681248401126,
+     "false_alarm": 0.11653868490675615
+    },
+    "isoforest_or": {
+     "detect": 0.24047070862113074,
+     "false_alarm": 0.1341227334322772
+    },
+    "isoforest_gated": {
+     "detect": 0.21181887950882577,
+     "false_alarm": 0.10089049493450346
+    },
+    "kmeans_or": {
+     "detect": 0.23995906881555384,
+     "false_alarm": 0.150254888042847
+    },
+    "kmeans_gated": {
+     "detect": 0.2307495523151701,
+     "false_alarm": 0.11286055365554623
+    }
+   },
+   "kmeans_k": 16
+  },
+  "Generic": {
+   "n_attack_test": 1220,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.6598360655737705,
+     "false_alarm": 0.0735303607149771
+    },
+    "gb": {
+     "detect": 0.9639344262295082,
+     "false_alarm": 0.06656126992321094
+    },
+    "rf_gb_mean": {
+     "detect": 0.9639344262295082,
+     "false_alarm": 0.07314318900432341
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.7877049180327869,
+     "false_alarm": 0.08646834871265406
+    },
+    "isoforest": {
+     "detect": 0.5901639344262295,
+     "false_alarm": 0.05917274311156998
+    },
+    "kmeans": {
+     "detect": 0.5188524590163934,
+     "false_alarm": 0.07394979673485191
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.969672131147541,
+     "false_alarm": 0.1368006710976318
+    },
+    "autoencoder_gated": {
+     "detect": 0.9680327868852459,
+     "false_alarm": 0.09446989739949668
+    },
+    "isoforest_or": {
+     "detect": 0.9655737704918033,
+     "false_alarm": 0.11311866812931536
+    },
+    "isoforest_gated": {
+     "detect": 0.9655737704918033,
+     "false_alarm": 0.08108020907272376
+    },
+    "kmeans_or": {
+     "detect": 0.9672131147540983,
+     "false_alarm": 0.12931535135832742
+    },
+    "kmeans_gated": {
+     "detect": 0.9672131147540983,
+     "false_alarm": 0.09624443440665935
+    }
+   },
+   "kmeans_k": 16
+  },
+  "Reconnaissance": {
+   "n_attack_test": 1874,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.3281750266808965,
+     "false_alarm": 0.07514357617603407
+    },
+    "gb": {
+     "detect": 0.3591248665955176,
+     "false_alarm": 0.0725624314383429
+    },
+    "rf_gb_mean": {
+     "detect": 0.3319103521878335,
+     "false_alarm": 0.07511131186681293
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.15901814300960512,
+     "false_alarm": 0.08866232173969155
+    },
+    "isoforest": {
+     "detect": 0.0240128068303095,
+     "false_alarm": 0.05878557140091631
+    },
+    "kmeans": {
+     "detect": 0.0005336179295624333,
+     "false_alarm": 0.04913854294379558
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.37620064034151546,
+     "false_alarm": 0.1463509066270891
+    },
+    "autoencoder_gated": {
+     "detect": 0.3697972251867663,
+     "false_alarm": 0.1027940891785507
+    },
+    "isoforest_or": {
+     "detect": 0.3591248665955176,
+     "false_alarm": 0.11773246434793831
+    },
+    "isoforest_gated": {
+     "detect": 0.3591248665955176,
+     "false_alarm": 0.08514551203458734
+    },
+    "kmeans_or": {
+     "detect": 0.3591248665955176,
+     "false_alarm": 0.11941020842743758
+    },
+    "kmeans_gated": {
+     "detect": 0.3591248665955176,
+     "false_alarm": 0.07866038588113829
+    }
+   },
+   "kmeans_k": 4
+  },
+  "Shellcode": {
+   "n_attack_test": 292,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.684931506849315,
+     "false_alarm": 0.07485319739304382
+    },
+    "gb": {
+     "detect": 0.6986301369863014,
+     "false_alarm": 0.06814222107504678
+    },
+    "rf_gb_mean": {
+     "detect": 0.6917808219178082,
+     "false_alarm": 0.07178808801703555
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.09246575342465753,
+     "false_alarm": 0.08417758275795315
+    },
+    "isoforest": {
+     "detect": 0.11643835616438356,
+     "false_alarm": 0.05791443505194554
+    },
+    "kmeans": {
+     "detect": 0.010273972602739725,
+     "false_alarm": 0.06346389623798154
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.7054794520547946,
+     "false_alarm": 0.13580047751177649
+    },
+    "autoencoder_gated": {
+     "detect": 0.702054794520548,
+     "false_alarm": 0.09127573078660386
+    },
+    "isoforest_or": {
+     "detect": 0.6986301369863014,
+     "false_alarm": 0.11289281796476737
+    },
+    "isoforest_gated": {
+     "detect": 0.6986301369863014,
+     "false_alarm": 0.08020907272375298
+    },
+    "kmeans_or": {
+     "detect": 0.708904109589041,
+     "false_alarm": 0.1214751242175905
+    },
+    "kmeans_gated": {
+     "detect": 0.708904109589041,
+     "false_alarm": 0.0838872039749629
+    }
+   },
+   "kmeans_k": 16
+  },
+  "Worms": {
+   "n_attack_test": 39,
+   "n_normal_test": 30994,
+   "classifiers": {
+    "legacy_blend": {
+     "detect": 0.9487179487179487,
+     "false_alarm": 0.07356262502419823
+    },
+    "gb": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.06617409821255726
+    },
+    "rf_gb_mean": {
+     "detect": 0.9487179487179487,
+     "false_alarm": 0.07317545331354455
+    }
+   },
+   "novelty_alone": {
+    "autoencoder": {
+     "detect": 0.7692307692307693,
+     "false_alarm": 0.08491966187003937
+    },
+    "isoforest": {
+     "detect": 0.1794871794871795,
+     "false_alarm": 0.057978963670387816
+    },
+    "kmeans": {
+     "detect": 0.3076923076923077,
+     "false_alarm": 0.0847906046331548
+    }
+   },
+   "combined_with_gb": {
+    "autoencoder_or": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.13554236303800735
+    },
+    "autoencoder_gated": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.09137252371426728
+    },
+    "isoforest_or": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.1125056462541137
+    },
+    "isoforest_gated": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.07998322255920501
+    },
+    "kmeans_or": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.14322126863263857
+    },
+    "kmeans_gated": {
+     "detect": 0.9230769230769231,
+     "false_alarm": 0.08614570562044267
+    }
+   },
+   "kmeans_k": 16
+  }
+ },
+ "summary_mean_over_attacks": {
+  "classifiers": {
+   "legacy_blend": {
+    "mean_detect": 0.6840203234003338,
+    "mean_false_alarm": 0.07698264180163901
+   },
+   "gb": {
+    "mean_detect": 0.7389242449079014,
+    "mean_false_alarm": 0.07062298796182774
+   },
+   "rf_gb_mean": {
+    "mean_detect": 0.7381522324159844,
+    "mean_false_alarm": 0.07427243982706329
+   }
+  },
+  "novelty_alone": {
+   "autoencoder": {
+    "mean_detect": 0.4779980037328014,
+    "mean_false_alarm": 0.08642174471044577
+   },
+   "isoforest": {
+    "mean_detect": 0.2635895164748311,
+    "mean_false_alarm": 0.05786066120324364
+   },
+   "kmeans": {
+    "mean_detect": 0.187965895771695,
+    "mean_false_alarm": 0.06755429366257268
+   }
+  },
+  "combined_with_gb": {
+   "autoencoder_or": {
+    "mean_detect": 0.7719099977283191,
+    "mean_false_alarm": 0.14178371441067444
+   },
+   "autoencoder_gated": {
+    "mean_detect": 0.7642451621637899,
+    "mean_false_alarm": 0.09652047349666243
+   },
+   "isoforest_or": {
+    "mean_detect": 0.751734487933322,
+    "mean_false_alarm": 0.11657094921597728
+   },
+   "isoforest_gated": {
+    "mean_detect": 0.7476766634455425,
+    "mean_false_alarm": 0.083937392900418
+   },
+   "kmeans_or": {
+    "mean_detect": 0.7510447279358338,
+    "mean_false_alarm": 0.13086045327769533
+   },
+   "kmeans_gated": {
+    "mean_detect": 0.7496725580335007,
+    "mean_false_alarm": 0.08660457579603222
+   }
+  }
+ },
+ "wall_seconds": 5238.7
+}

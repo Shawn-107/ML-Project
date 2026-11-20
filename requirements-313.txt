@@ -1,0 +1,18 @@
+# Pinned, long-established versions for the Python 3.13 environment (.venv313).
+# Why: Windows Smart App Control (ON) blocked the brand-new versions in the first environment (.venv: Python 3.15.2,
+# numpy 2.5.5, pandas 3.1.1, scikit-learn 1.9.1) after a restart: numpy.fft, scipy.stats, pandas, sklearn failed with
+# "An Application Control policy has blocked this file". These older, widely used versions load fine.
+# Python: 3.13.17 from python.org (valid Python Software Foundation signature), extracted to .runtime/py313.
+# Build: .runtime\py313\python.exe -m venv .venv313
+#        .venv313\Scripts\python.exe -m pip install --only-binary=:all: -r requirements-313.txt
+#        .venv313\Scripts\python.exe -m pip install --no-deps -e . -e legacy/nids_backend
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.2.3
+scikit-learn==1.6.1
+joblib==1.4.2
+matplotlib==3.10.3
+scapy==2.6.1
+pytest==8.4.1
+tqdm
+torch==2.7.1

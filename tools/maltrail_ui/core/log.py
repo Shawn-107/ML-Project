@@ -1,0 +1,922 @@
+#!/usr/bin/env python
+
+"""
+Copyright (c) 2014-present Maltrail developers (https://github.com/stamparm/maltrail/)
+See the file 'LICENSE' for copying permission
+"""
+
+import binascii
+import datetime
+import glob
+import hashlib
+import hmac
+import json
+import os
+import re
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import threading
+import time
+import traceback
+
+from core.addr import parse_host_port
+from core.addr import resolve_address
+from core.common import check_sudo
+from core.settings import config
+from core.settings import DEFAULT_ERROR_LOG_PERMISSIONS
+from core.settings import DEFAULT_EVENT_LOG_PERMISSIONS
+from core.settings import TIME_FORMAT
+from core.settings import UNICODE_ENCODING
+from collections import OrderedDict
+import socketserver as _socketserver
+
+_single_messages = set()
+_thread_data = threading.local()
+
+# ---- sensor liveness (the `!HB` datagrams handled in start_logd below) ----
+#
+# A sensor that has stopped and a sensor with nothing to report look IDENTICAL here: both send no
+# events. That is issue #19627 - a sensor broken by an update went unnoticed for weeks, because a
+# quiet link produces exactly the same silence. So sensors announce themselves on a period, and
+# this is where that is remembered.
+#
+# Kept in memory, and copied to LOG_DIR/sensors.json by core/alert.py's liveness check: a restart
+# must still know which sensors should be reporting, or one that died before it is simply absent.
+# A row loaded from that file keeps its old last_seen, so it reads as stale until the sensor beats.
+#
+# The cap and the eviction matter because the listener is unauthenticated unless LOG_SERVER_SECRET
+# is set: without it, anything that can reach the port can invent sensor names. Ordering by
+# recency means a flood evicts the STALEST entry, so a live sensor - which refreshes itself every
+# period - survives one. A flood of more than MAX_SENSOR_STATUS distinct names between two
+# heartbeats does displace real sensors, and the fix for that is the secret, not a bigger dict.
+_sensor_status = OrderedDict()
+_sensor_status_lock = threading.Lock()
+MAX_SENSOR_STATUS = 1024
+# Delivery accounting (heartbeat_event): events received per sending address, and per sensor the
+# (address, sent, received) its count started from.
+_received = {}
+_delivery = {}
+MAX_SENSOR_FIELD = 64
+
+# Datagrams refused by mts_open(), per sending address: the other half of the liveness picture. A
+# sensor with a wrong LOG_SERVER_SECRET, or a clock outside LOG_SERVER_SKEW, has EVERY event and
+# every heartbeat refused, so it would otherwise just look dead. Bounded and evicted like the
+# sensor table, for the same reason: anyone who can reach the port can make it refuse things.
+_rejected = OrderedDict()
+MAX_REJECTED_SOURCES = 256
+
+# The receiver runs in its own process (start_logd), which reports its tables back here; one
+# entry per receiver, merged on read.
+_receiver_status = {}
+_status_dirty = threading.Event()
+HEARTBEAT_MARK = b"!HB"
+
+def create_log_directory():
+    if not os.path.isdir(config.LOG_DIR):
+        if not config.DISABLE_CHECK_SUDO and check_sudo() is False:
+            sys.exit("[!] please rerun with sudo/Administrator privileges")
+        os.makedirs(config.LOG_DIR, 0o755)
+    print("[i] using '%s' for log storage" % config.LOG_DIR)
+
+def get_event_log_handle(sec, flags=os.O_APPEND | os.O_CREAT | os.O_WRONLY, reuse=True):
+    retval = None
+    localtime = time.localtime(sec)
+
+    _ = os.path.join(config.LOG_DIR, "%d-%02d-%02d.log" % (localtime.tm_year, localtime.tm_mon, localtime.tm_mday))
+
+    if not reuse:
+        if not os.path.exists(_):
+            open(_, "w+").close()
+            os.chmod(_, DEFAULT_EVENT_LOG_PERMISSIONS)
+
+        retval = os.open(_, flags)
+    else:
+        # A day's log renamed or deleted under us (logrotate, an operator's `mv`) would keep taking
+        # events through the cached descriptor until midnight. Checked at most once a second: a
+        # stat per datagram is not affordable at tens of thousands a second.
+        now = time.time()
+        if _ == getattr(_thread_data, "event_log_path", None) and now - _thread_data.event_log_checked >= 1:
+            _thread_data.event_log_checked = now
+            try:
+                if not os.path.samestat(os.stat(_), os.fstat(_thread_data.event_log_handle)):
+                    _thread_data.event_log_path = None
+            except OSError:
+                _thread_data.event_log_path = None
+
+        if _ != getattr(_thread_data, "event_log_path", None):
+            if not os.path.exists(_):
+                open(_, "w+").close()
+                os.chmod(_, DEFAULT_EVENT_LOG_PERMISSIONS)
+
+            # The cache changes only once the new file is open: a failed open must leave the next
+            # call retrying it, not a matching path with a closed descriptor behind it.
+            handle = os.open(_, flags)
+            if getattr(_thread_data, "event_log_handle", None) is not None:
+                try:
+                    os.close(_thread_data.event_log_handle)
+                except OSError:
+                    pass
+
+            _thread_data.event_log_path, _thread_data.event_log_handle, _thread_data.event_log_checked = _, handle, now
+
+        retval = _thread_data.event_log_handle
+
+    return retval
+
+def _share_error_log(path):
+    """
+    error.log is shared with the sensor, which may run as another user. It used to be created 0666
+    for that, so any local account could append forged lines or fill the disk through it. Now
+    0644, owned by whoever owns the log directory; a root process hands its file over, and an
+    existing world-writable file is tightened. sensor/src/output.rs does the same.
+    """
+
+    try:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            directory = os.stat(os.path.dirname(os.path.abspath(path)))
+            os.chown(path, directory.st_uid, directory.st_gid)
+        mode = os.stat(path).st_mode
+        if mode & stat.S_IWOTH:
+            os.chmod(path, stat.S_IMODE(mode) & 0o755)
+    except OSError:
+        pass
+
+def get_error_log_handle(flags=os.O_APPEND | os.O_CREAT | os.O_WRONLY):
+    if not hasattr(_thread_data, "error_log_handle"):
+        _ = os.path.join(config.get("LOG_DIR") or os.curdir, "error.log")
+        if not os.path.exists(_):
+            open(_, "w+").close()
+            os.chmod(_, DEFAULT_ERROR_LOG_PERMISSIONS)
+        _share_error_log(_)
+        _thread_data.error_log_path = _
+        _thread_data.error_log_handle = os.open(_thread_data.error_log_path, flags)
+    return _thread_data.error_log_handle
+
+def safe_value(value):
+    r"""
+    Renders a single event-log field safely (CSV-style quoting/escaping; newlines flattened to spaces)
+
+    >>> safe_value("hello")
+    'hello'
+    >>> safe_value("")
+    '-'
+    >>> safe_value(None)
+    '-'
+    >>> safe_value("a b")
+    '"a b"'
+    >>> safe_value('a"b')
+    '"a""b"'
+    >>> safe_value("line\nbreak")
+    '"line break"'
+    """
+
+    retval = str(value or '-')
+    retval = re.sub(r"[\x0a\x0d]", " ", retval)   # flatten CR/LF FIRST: doing it after the quote check let a newline-only value emit an unquoted space -> the field split into two on re-parse (column corruption / log injection)
+    if any(_ in retval for _ in (' ', '"')):
+        retval = "\"%s\"" % retval.replace('"', '""')
+    return retval
+
+_endpoints_cache = {}
+
+def _endpoints(value):
+    """
+    Splits a remote-logging option into its endpoints, so one option can name several targets:
+
+        SYSLOG_SERVER 192.168.1.15:514, 192.168.1.16:514
+
+    Requested for redundant SIEM/collector targets (issue #15164). Separating inside the existing
+    option rather than adding SYSLOG_SERVER_1, _2, ... keeps every configuration that names a
+    single endpoint working unchanged, and matches how the other list-valued options in
+    maltrail.conf (e.g. FAIL2BAN_ALLOWLIST) are already written.
+
+    Memoized: the split is pure string work over a value that never changes.
+
+    >>> _endpoints("1.2.3.4:514")
+    ['1.2.3.4:514']
+    >>> _endpoints("1.2.3.4:514, 5.6.7.8:514")
+    ['1.2.3.4:514', '5.6.7.8:514']
+    >>> _endpoints("[::1]:514 1.2.3.4:514")
+    ['[::1]:514', '1.2.3.4:514']
+    >>> _endpoints("")
+    []
+    """
+
+    retval = _endpoints_cache.get(value)
+    if retval is None:
+        retval = [_ for _ in re.split(r"[,;\s]+", value or "") if _]
+        _endpoints_cache[value] = retval
+    return retval
+
+_endpoint_cache = {}
+
+def _endpoint_address(value):
+    """
+    Returns (socket family, sockaddr) for a remote-logging endpoint, IPv4/IPv6-safe.
+    IPv4 addresses / hostnames keep the (host, port) form (sendto resolves them); IPv6 literals are resolved up-front.
+
+    NOTE: memoized per endpoint string - the IPv6 branch calls getaddrinfo (a potentially blocking DNS round-trip),
+    and endpoints are stable config values, so resolve once instead of per datagram.
+    """
+
+    retval = _endpoint_cache.get(value)
+    if retval is None:
+        host, port = parse_host_port(value)
+        if ':' in host:
+            retval = (socket.AF_INET6, resolve_address(host, port))
+        else:
+            retval = (socket.AF_INET, (host, port))
+        _endpoint_cache[value] = retval
+    return retval
+
+_socket_cache = {}                  # family -> a reused UDP socket (one datagram socket serves any destination of that family)
+
+def _send_datagram(endpoint, data):
+    """
+    Sends a UDP datagram to a remote-logging endpoint, reusing a per-family socket instead of creating and closing
+    one for every event. On a send error the cached socket is dropped and recreated once (e.g. a transient fd issue).
+    """
+
+    family, address = _endpoint_address(endpoint)
+    sock = _socket_cache.get(family)
+    if sock is None:
+        sock = _socket_cache[family] = socket.socket(family, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(data, address)
+    except socket.error:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        try:
+            sock = _socket_cache[family] = socket.socket(family, socket.SOCK_DGRAM)
+            sock.sendto(data, address)
+        except socket.error:
+            pass
+
+def _cef_escape(value, extension=False):
+    # CEF (ArcSight) escaping: '\' and '|' in the header fields (e.g. name); '\' and '=' in extension VALUES.
+    # newlines terminate a syslog record, so they must never appear inside a field. Output is byte-identical
+    # when the value has no special chars, so well-behaved trails are unaffected; a trail/info with '='/'|'
+    # (e.g. a URL trail "host/?a=b") would otherwise emit a malformed CEF line the SIEM mis-parses.
+    retval = str(value).replace("\\", "\\\\")
+    retval = retval.replace("=", "\\=") if extension else retval.replace("|", "\\|")
+    return retval.replace("\r", " ").replace("\n", " ")
+
+def event_json(event_tuple, severity, sensor, localtime=None):
+    """One event as a JSON object, the form LOGSTASH_SERVER has always sent.
+
+    Extracted so there is exactly one definition of what an event looks like in JSON. It is also
+    what `LOCAL_LOG_FORMAT json` writes, so a file on disk and a datagram on the wire describe an
+    event the same way - and `sensor/src/output.rs` renders it byte-for-byte identically, which
+    `sensor/tests/vectors.rs` pins against this function's output.
+
+    `localtime` adds the "time" field and is what makes the on-disk form LOSSLESS. The wire form
+    carries `timestamp` in whole seconds, which is fine for a datagram but would quietly drop the
+    microseconds every text log line has always recorded. Passing it is therefore what the local
+    log does and what LOGSTASH_SERVER does not - adding the field unconditionally would change a
+    wire format that existing consumers are already parsing.
+    """
+
+    sec, _, src_ip, src_port, dst_ip, dst_port, proto, trail_type, trail, info, reference = event_tuple
+    fields = [("timestamp", sec)]
+    if localtime is not None:
+        fields.append(("time", localtime))
+    fields.extend((
+        ("sensor", sensor),
+        ("severity", severity),
+        ("src_ip", src_ip),
+        ("src_port", src_port),
+        ("dst_ip", dst_ip),
+        ("dst_port", dst_port),
+        ("proto", proto),
+        ("type", trail_type),
+        ("trail", trail),
+        ("info", info),
+        ("reference", reference),
+    ))
+    return json.dumps(OrderedDict(fields))
+
+def severity_of(info, reference=""):
+    """"low" / "medium" / "high" for an event, per REMOTE_SEVERITY_REGEX.
+
+    Matched against "<info> <reference>", not the info alone. Whether a verdict was CORROBORATED
+    lives in the reference - "(heuristic)" is the sensor's own guess, "(static)" is a feed hit -
+    and the dashboard has ranked guesses below feed hits since 307e0e8. With only the info to look
+    at, that rule was inexpressible here, so the two disagreed on ten of the shipped verdicts:
+    "long domain (suspicious)" read LOW on the dashboard and alerted as MEDIUM. Appending the
+    reference cannot break an existing custom regex - re.search is unanchored, so a longer subject
+    only ever matches more.
+
+    Used by core/alert.py, and kept in step with the sensor's own copy (sensor/src/output.rs,
+    checked by tests/test_severity_parity.py), so an operator tunes one regex and every outbound
+    channel agrees. Unmatched is "medium": the shipped regex names
+    the extremes (malware/ransomware/adversary high, scanner/reputation/attacker low) and leaves the
+    middle - exploit kits, web skimmers - implicit.
+
+    No doctest: the answer depends on the configured REMOTE_SEVERITY_REGEX, and with none loaded
+    every info is "medium". tests/test_alert.py asserts the classification against the regex
+    maltrail.conf actually ships.
+    """
+
+    retval = "medium"
+
+    if config.REMOTE_SEVERITY_REGEX:
+        match = re.search(config.REMOTE_SEVERITY_REGEX, "%s %s" % (info or "", reference or ""))
+        if match:
+            groups = match.groupdict()   # NOTE: groupdict().get() (not match.group(name)) - a custom REMOTE_SEVERITY_REGEX that omits a low/medium/high group would otherwise raise IndexError ("no such group") per event
+            for _ in ("low", "medium", "high"):
+                if groups.get(_):
+                    retval = _
+                    break
+
+    return retval
+
+
+def log_error(msg, single=False):
+    if single:
+        if msg in _single_messages:
+            return
+        else:
+            _single_messages.add(msg)
+
+    try:
+        handle = get_error_log_handle()
+        os.write(handle, ("%s %s\n" % (time.strftime(TIME_FORMAT, time.localtime()), msg)).encode(UNICODE_ENCODING))
+    except (OSError, IOError):
+        # error.log may belong to the account the sensor runs as: stderr rather than nowhere
+        sys.stderr.write("[!] %s\n" % msg)
+        if config.SHOW_DEBUG:
+            traceback.print_exc()
+
+# ---- authenticated event datagrams (LOG_SERVER_SECRET) ----
+#
+# The UDP listener below is unauthenticated by protocol design: anything that can reach the port
+# can append to the log an operator reasons from, and that /events, /counts and /fail2ban parse.
+# Forged detections are a worse problem for an IDS than eavesdropping, and the newline-collapsing
+# defence further down only limits what one forged datagram can do, not who may send one.
+#
+# With LOG_SERVER_SECRET set on both ends every datagram carries a MAC over its exact payload and
+# the receiver drops whatever does not verify. The frame is:
+#
+#     MTS1 <32 hex chars> <payload>
+#
+# where <payload> is byte-for-byte what an unsigned sender would have put on the wire, so the
+# parser underneath is untouched and one wire format serves both modes.
+#
+# HMAC-SHA256 truncated to 128 bits (RFC 2104 section 5), hex-encoded so a datagram stays greppable
+# text like everything else on this path. The frame costs 38 bytes on a ~110-byte event - about a
+# third - which is far more than compressing the payload could ever save: gzip on a single event of
+# this size makes it BIGGER, and raw deflate wins 9%. That is the clearest evidence that bandwidth
+# is not the constraint here. In absolute terms it is 11.8 Mbit/s instead of 8.7 at 10,000 events a
+# second, which is a rate no deployment sustains.
+#
+# This authenticates; it does not encrypt. The event is still readable to anyone on the path. That
+# is a deliberate scope: forgery is the attack that corrupts the evidence, and confidentiality is
+# better bought with WireGuard or IPsec than with a bespoke scheme here.
+#
+# Replay is BOUNDED, not eliminated. The signed payload leads with the event's epoch second and a
+# datagram outside LOG_SERVER_SKEW of now is dropped, so yesterday's traffic cannot be replayed
+# forever. Inside that window a captured datagram can be replayed, which duplicates one real event.
+# Inventing an event that never happened - the attack worth stopping - needs the secret.
+
+MTS_PREFIX = b"MTS1 "
+MTS_MAC_HEX = 32                       # 16 raw bytes, hex-encoded
+LOG_SERVER_SKEW = 900                  # default seconds of clock skew and delivery delay tolerated
+
+
+def _skew_window():
+    """How far from the server's clock a signed event may be, in seconds. 0 disables the check.
+
+    Timezones are NOT what this is for: the signed field is an epoch second, which is absolute, so
+    a sensor in Tokyo and a server in Zagreb agree on it exactly. This is clock SKEW - a host with
+    no NTP, a board with no RTC that boots before the network, a VM resumed from a snapshot.
+
+    Configurable because the failure is total rather than partial: a sensor whose clock is wrong
+    has EVERY event refused, and 900 seconds is a judgement about how well-synchronised a fleet is,
+    which is the operator's to make and not ours.
+    """
+
+    # `or` would be wrong here: 0 is the documented way to switch the check off, and `0 or 900`
+    # is 900 - the setting would silently do the opposite of what it says.
+    value = getattr(config, "LOG_SERVER_SKEW", None)
+    if value is None or value == "":
+        return LOG_SERVER_SKEW
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return LOG_SERVER_SKEW
+
+
+def _mts_drop(reason, source=None):
+    """Record why a datagram was refused, and say so when debugging is on.
+
+    Every rejection here is silent by necessity - the sender is unauthenticated, so there is
+    nobody to tell - and that produces the worst failure this project has: a sensor that looks
+    healthy while its events never arrive. A skewed clock or a mismatched secret drops EVERY
+    event. So the refusal is counted per source and shown in /sensors, next to the sensors that
+    do check in.
+    """
+
+    if getattr(config, "SHOW_DEBUG", False):
+        sys.stderr.write("[x] dropped an event datagram: %s\n" % reason)
+
+    if source is not None:
+        with _sensor_status_lock:
+            entry = _rejected.get(source)
+            if entry is None:
+                if len(_rejected) >= MAX_REJECTED_SOURCES:
+                    _rejected.popitem(last=False)
+                entry = _rejected[source] = {"address": source, "count": 0}
+            else:
+                _rejected.move_to_end(source)
+            entry["count"] += 1
+            entry["reason"] = reason
+            entry["last_seen"] = int(time.time())
+        _status_dirty.set()
+
+    return None
+
+
+def _mts_mac(secret, payload):
+    if not isinstance(secret, bytes):
+        secret = secret.encode(UNICODE_ENCODING)
+    return binascii.hexlify(hmac.new(secret, payload, hashlib.sha256).digest()[:16])
+
+
+def mts_sign(secret, payload):
+    """Frame and sign a payload. Returns the payload unchanged when there is no secret."""
+
+    if not secret:
+        return payload
+    return MTS_PREFIX + _mts_mac(secret, payload) + b" " + payload
+
+
+def mts_open(secret, data, now=None, source=None):
+    """The payload carried by a datagram, or None if it must be dropped.
+
+    With a secret the frame is REQUIRED and verified, which is what closes the injection hole.
+
+    Without a secret a frame is stripped but not checked. That is deliberate: a sensor already
+    given the secret, pointed at a server that has not been, still records its events instead of
+    writing "MTS1 <mac> ..." into the log as if it were an event. The two ends can then be
+    upgraded in either order, which matters when they are different machines owned by different
+    people.
+    """
+
+    framed = data.startswith(MTS_PREFIX)
+
+    if not secret:
+        if not framed:
+            return data
+        rest = data[len(MTS_PREFIX):]
+        return rest[MTS_MAC_HEX + 1:] if len(rest) > MTS_MAC_HEX else None
+
+    if not framed:
+        return _mts_drop("unsigned, but 'LOG_SERVER_SECRET' is set (sender not configured with it?)", source)
+
+    rest = data[len(MTS_PREFIX):]
+    if len(rest) <= MTS_MAC_HEX or rest[MTS_MAC_HEX:MTS_MAC_HEX + 1] != b" ":
+        return _mts_drop("malformed frame", source)
+
+    given, payload = rest[:MTS_MAC_HEX], rest[MTS_MAC_HEX + 1:]
+    if not hmac.compare_digest(given, _mts_mac(secret, payload)):
+        return _mts_drop("bad MAC (the two ends disagree on 'LOG_SERVER_SECRET')", source)
+
+    head = payload.split(b" ", 1)[0]
+    if not head.isdigit():
+        return _mts_drop("signed payload does not start with an epoch second", source)
+
+    window = _skew_window()
+    skew = (time.time() if now is None else now) - int(head)
+    if window and abs(skew) > window:
+        return _mts_drop("timestamp is %ds away, outside the %ds 'LOG_SERVER_SKEW' window (sender "
+                         "clock skew, or an offline replay of an old capture - use "
+                         "'--timestamps wallclock' for that)" % (skew, window), source)
+
+    return payload
+
+
+def _sensor_field(value):
+    """One heartbeat field, made safe to store and to render.
+
+    Every field is chosen by the sender, and without LOG_SERVER_SECRET the sender is anybody who
+    can reach the port. These end up in a JSON document the dashboard renders, so anything that is
+    not plainly a hostname or a version is dropped rather than escaped - there is no legitimate
+    heartbeat that needs a quote, an angle bracket or a control character in it.
+    """
+
+    value = value.decode(UNICODE_ENCODING, "replace")
+    return re.sub(r"[^\w.:@+-]", "", value)[:MAX_SENSOR_FIELD]
+
+
+def heartbeat_event(data, source, seen=None):
+    """Record a liveness datagram, and report whether that is what this was.
+
+    The payload is `<epoch_sec> !HB <sensor> <version> <uptime_s> [<sent> [<captured> <dropped>]]`. It leads with the epoch second
+    because mts_open() requires that of anything signed - so a heartbeat gets the same replay
+    bound as an event - and `!HB` cannot be confused with an event, whose second token is always a
+    quoted local timestamp.
+
+    Returns True when the datagram was a heartbeat and must NOT reach the event log: liveness is
+    not a detection, and writing it to the log would put it in /events, /counts and /fail2ban.
+    """
+
+    # maxsplit: a heartbeat has at most eight fields, and a 64 KB datagram of spaces should not
+    # become a 32,000-element list on the receive loop's only thread.
+    parts = data.split(b' ', 7)
+    if len(parts) < 3 or parts[1] != HEARTBEAT_MARK:
+        if source in _received:
+            _received[source] += 1
+        return False
+
+    number = lambda i: int(parts[i]) if len(parts) > i and parts[i].strip().isdigit() and len(parts[i]) <= 20 else None
+    sensor = _sensor_field(parts[2]) or '-'
+    status = {"sensor": sensor,
+              "version": _sensor_field(parts[3]) if len(parts) > 3 else "",
+              "uptime": number(4),
+              "address": source,
+              "last_seen": int(time.time() if seen is None else seen)}
+
+    # The sixth field (newer sensors) counts the events sent to LOG_SERVER. Against what arrived
+    # from the same address since this receiver first heard the sensor, the difference is what was
+    # lost on the way - a full receive buffer, a lossy path - which neither end could see before.
+    # A sensor restart (the count goes down) or a new address starts the count again.
+    sent, base = number(5), _delivery.get(sensor)
+    if sent is not None and (base is None or base[0] != source or sent < base[1]):
+        base = None
+        if sensor in _delivery or max(len(_delivery), len(_received)) < MAX_SENSOR_STATUS:
+            base = _delivery[sensor] = (source, sent, _received.setdefault(source, 0))
+    if sent is not None and base is not None:
+        status["sent"] = sent - base[1]
+        status["lost"] = max(0, status["sent"] - (_received[source] - base[2]))
+
+    # Packets libpcap received and dropped (kernel + interface) since the sensor started. Without
+    # them a sensor dropping half its traffic looked exactly as healthy here as one dropping none.
+    if number(6) is not None and number(7) is not None:
+        status["captured"], status["dropped"] = number(6), number(7)
+
+    with _sensor_status_lock:
+        # move_to_end makes the dict ordered by recency, so popitem(last=False) drops the sensor
+        # that has been quiet longest - the one whose slot is worth least.
+        if sensor in _sensor_status:
+            _sensor_status.move_to_end(sensor)
+        elif len(_sensor_status) >= MAX_SENSOR_STATUS:
+            _sensor_status.popitem(last=False)
+        _sensor_status[sensor] = status
+    _status_dirty.set()
+
+    return True
+
+
+def read_local_heartbeats():
+    """Take in LOG_DIR/<sensor>.heartbeat, which a sensor without LOG_SERVER writes instead of
+    sending (the single-host install, which otherwise had no liveness at all). Last seen is the
+    file's mtime, so a sensor that stopped writing goes stale like one that stopped sending."""
+
+    for name in glob.glob(os.path.join(config.LOG_DIR or "", "*.heartbeat")):
+        try:
+            with open(name, "rb") as f:
+                data = f.read(512)
+            heartbeat_event(data, "local", seen=os.path.getmtime(name))
+        except (IOError, OSError):
+            pass
+
+
+def _merged(local, field, key, limit):
+    """`local` and every receiver's `field` rows, one per `key`, the freshest winning, at most `limit`."""
+
+    rows = {}
+    with _sensor_status_lock:
+        sources = [list(local.values())] + [_.get(field, []) for _ in _receiver_status.values()]
+    for row in (row for source in sources for row in source):
+        if row[key] not in rows or row.get("last_seen", 0) >= rows[row[key]].get("last_seen", 0):
+            rows[row[key]] = row
+    return sorted(rows.values(), key=lambda _: _.get("last_seen", 0))[-limit:]
+
+
+def sensor_status():
+    """Every sensor heard from since this process started, most recently seen last."""
+
+    return _merged(_sensor_status, "sensors", "sensor", MAX_SENSOR_STATUS)
+
+
+SENSOR_STATUS_FILE = "sensors.json"
+
+
+def load_sensor_status():
+    """Seed the table from LOG_DIR/sensors.json, so a restart still knows who should be reporting.
+
+    Returns the names already reported silent (core/alert.py), so a restart does not report them
+    again. A missing or unreadable file is an empty start, never a crash.
+    """
+
+    try:
+        with open(os.path.join(config.LOG_DIR, SENSOR_STATUS_FILE)) as f:
+            data = json.load(f)
+        rows = [_ for _ in data["sensors"] if isinstance(_.get("sensor"), str) and isinstance(_.get("last_seen"), int)]
+        silent = set(_ for _ in data.get("silent", []) if isinstance(_, str))
+    except Exception:
+        return set()
+
+    with _sensor_status_lock:
+        for row in sorted(rows, key=lambda _: _["last_seen"])[-MAX_SENSOR_STATUS:]:
+            if row["sensor"] not in _sensor_status:
+                _sensor_status[row["sensor"]] = row
+    return silent
+
+
+def save_sensor_status(rows, silent):
+    """Atomically replace LOG_DIR/sensors.json with `rows` and the names reported silent."""
+
+    path = os.path.join(config.LOG_DIR, SENSOR_STATUS_FILE)
+    try:
+        with open(path + ".tmp", "w") as f:
+            json.dump({"sensors": rows, "silent": sorted(silent)}, f)
+        os.replace(path + ".tmp", path)
+    except (IOError, OSError) as ex:
+        log_error("unable to write '%s' (%s)" % (path, ex), single=True)
+
+
+def rejected_status():
+    """Every address whose datagrams were refused, with the latest reason, most recent last."""
+
+    return _merged(_rejected, "rejected", "address", MAX_REJECTED_SOURCES)
+
+
+# Datagrams ACCEPTED although their epoch is outside the LOG_SERVER_SKEW window (only possible
+# without LOG_SERVER_SECRET, which refuses them). They are filed under their own day, as they must
+# be for a sensor replaying an old capture - but from a sensor with a wrong clock that day is not
+# today, so they were missing from today's view and from alerting while the sensor looked healthy.
+# Counted per sender for /sensors, with one error.log line per sender. A heartbeat that is off
+# ("clock") tells a wrong clock from a replay: a replaying sensor beats with its real clock.
+_skewed = OrderedDict()
+_skew_reported = set()
+
+
+def note_skew(data, source, now=None):
+    """Record `data` (an opened datagram) when its leading epoch is outside the window. True if so."""
+
+    head = data.split(b" ", 1)[0]
+    window = _skew_window()
+    if not window or not head.isdigit() or len(head) > 12:
+        return False
+    now = int(time.time() if now is None else now)
+    offset = int(head) - now
+    if abs(offset) <= window:
+        return False
+
+    with _sensor_status_lock:
+        entry = _skewed.get(source)
+        if entry is None:
+            if len(_skewed) >= MAX_REJECTED_SOURCES:
+                _skewed.popitem(last=False)
+            entry = _skewed[source] = {"address": source, "count": 0, "clock": False}
+        else:
+            _skewed.move_to_end(source)
+        entry["count"] += 1
+        entry["offset"] = offset
+        entry["clock"] = entry["clock"] or data[len(head) + 1:].startswith(HEARTBEAT_MARK)
+        entry["last_seen"] = now
+    _status_dirty.set()
+
+    # Once per sender, and a bounded number of senders: the port is unauthenticated here.
+    if source not in _skew_reported and len(_skew_reported) < MAX_REJECTED_SOURCES:
+        _skew_reported.add(source)
+        log_error("events from %s carry timestamps %+.1f h off the server clock; they are filed under those days" % (source, offset / 3600.0))
+    return True
+
+
+def skew_status():
+    """Every sender whose accepted datagrams were dated outside the skew window, most recent last."""
+
+    return _merged(_skewed, "skewed", "address", MAX_REJECTED_SOURCES)
+
+
+# Events the receiver could not write (LOG_DIR unwritable, disk full, I/O error). Each one is lost
+# for good, and it used to be lost silently: the dashboard went empty while the sensor stayed green.
+# Counted for /sensors, and reported to error.log the way core/alert.py reports a failing webhook.
+_write_failures = {"dropped": 0, "last_error": None, "last_failed": None, "failing_since": None, "reported": 0}
+WRITE_FAILURE_REPORT_PERIOD = 300
+
+
+def _event_write_failed(ex):
+    now = time.time()
+    _write_failures["dropped"] += 1
+    _write_failures["last_error"] = "%s (%s)" % (getattr(ex, "strerror", None) or ex, getattr(ex, "filename", None) or getattr(_thread_data, "event_log_path", None) or config.LOG_DIR)
+    _write_failures["last_failed"] = int(now)
+    _thread_data.event_log_path = None      # reopen on the next event: a stale descriptor heals itself
+    if _write_failures["failing_since"] is None:
+        _write_failures["failing_since"] = now
+    if now - _write_failures["reported"] >= WRITE_FAILURE_REPORT_PERIOD:
+        _write_failures["reported"] = now
+        log_error("event log write failed: %s; %d event(s) DROPPED so far" % (_write_failures["last_error"], _write_failures["dropped"]))
+    _status_dirty.set()
+
+
+def write_status():
+    """Events dropped because the log could not be written, and the latest reason, over every receiver."""
+
+    with _sensor_status_lock:
+        rows = [_write_failures] + [_.get("write") or {} for _ in _receiver_status.values()]
+    latest = max(rows, key=lambda _: _.get("last_failed") or 0)
+    return {"dropped": sum(_.get("dropped", 0) for _ in rows), "last_error": latest.get("last_error"),
+            "last_failed": latest.get("last_failed"), "failing": any(_.get("failing_since") for _ in rows)}
+
+
+class _LogUDPServer(_socketserver.UDPServer):
+    def server_bind(self):
+        # The default receive buffer holds ~2k of these datagrams, so a burst overruns it while the loop
+        # is still writing. This asks for 8 MB, but the kernel CLAMPS it to net.core.rmem_max without
+        # error - which on a stock box is the 208 KB default, i.e. no change at all. It is here because
+        # it is one line and it does help on a host whose operator has raised rmem_max for exactly this.
+        try:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024 * 1024)
+        except Exception:
+            pass
+        _socketserver.UDPServer.server_bind(self)
+
+
+class _UDPHandler(_socketserver.BaseRequestHandler):
+    def handle(self):
+        try:
+            data, _ = self.request
+
+            # Authenticate before parsing. With LOG_SERVER_SECRET set this is what makes the
+            # listener refuse events it cannot attribute; without it, behaviour is unchanged.
+            data = mts_open(getattr(config, "LOG_SERVER_SECRET", None), data, source=self.client_address[0])
+            if data is None:
+                return
+
+            note_skew(data, self.client_address[0])
+
+            # Liveness, not a detection: recorded in memory and never written to the log.
+            if heartbeat_event(data, self.client_address[0]):
+                return
+
+            if data[0:1].isdigit():     # Note: regular format with timestamp in front
+                sec, event = data.split(b' ', 1)
+            else:                       # Note: naive format without timestamp in front
+                event_date = datetime.datetime.strptime(data[1:data.find(b'.')].decode(UNICODE_ENCODING), TIME_FORMAT)
+                sec = int(time.mktime(event_date.timetuple()))
+                event = data
+
+            # One datagram is one record. A sensor never sends an embedded newline, so the
+            # only way to get one here is a forged datagram - and this listener is
+            # unauthenticated by protocol design, so anyone who can reach the port could
+            # append arbitrary extra "events" to the log by putting '\n' in the middle of
+            # one. That is evidence tampering in an IDS: the log is what an operator
+            # reasons from and what /events, /counts and /fail2ban parse.
+            #
+            # Collapse the interior newlines rather than dropping the datagram, so a
+            # malformed-but-honest sender still gets its event recorded, on one line.
+            event = event.rstrip(b'\r\n').replace(b'\r', b' ').replace(b'\n', b' ') + b'\n'
+
+            # reuse=True: one receive loop means one thread, so the thread-local handle is a real cache
+            # instead of a miss on every datagram. It is reopened when the day's path changes.
+            try:
+                os.write(get_event_log_handle(int(sec)), event)
+            except (OSError, IOError) as ex:
+                _event_write_failed(ex)
+            else:
+                if _write_failures["failing_since"] is not None:
+                    log_error("event log writing again after %d event(s) dropped" % _write_failures["dropped"])
+                    _write_failures["failing_since"] = None
+                    _status_dirty.set()
+        except Exception:
+            if config.SHOW_DEBUG:
+                traceback.print_exc()
+
+
+# What the receiver process needs of the configuration: it writes the log and authenticates.
+_RECEIVER_SETTINGS = ("LOG_DIR", "LOG_SERVER_SECRET", "LOG_SERVER_SKEW", "SHOW_DEBUG")
+_receivers = []
+
+
+def _receiver_main(fd, family, settings):
+    """The receiver process: serve the socket the parent bound, report tables on stdout.
+
+    Its own process because the server is one Python process, and a thread in it gets the
+    interpreter only between other threads' 5 ms slices. With any other thread busy - a /hunt,
+    the 8-second /fail2ban rescans, an index build, the trail update - a receive thread drained
+    the socket that seldom, and measured at 5,000 events/s 98% of the datagrams were lost in the
+    kernel buffer, every day and with nothing reporting it. Alone, it loses none.
+    """
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)    # Ctrl-C is the parent's to handle
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    config.update(json.loads(settings))
+
+    def report():
+        while True:
+            _status_dirty.wait()
+            _status_dirty.clear()
+            with _sensor_status_lock:
+                line = json.dumps({"sensors": list(_sensor_status.values()), "rejected": list(_rejected.values()), "write": _write_failures, "skewed": list(_skewed.values())})
+            try:
+                sys.stdout.write(line + "\n")
+                sys.stdout.flush()
+            except Exception:
+                os._exit(0)
+            time.sleep(0.1)     # at most ten reports a second, however hard the port is flooded
+
+    def orphaned():
+        # The parent holds the other end of stdin; end of file means it is gone, by any death.
+        sys.stdin.read()
+        os._exit(0)
+
+    for target in (report, orphaned):
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+
+    server = _LogUDPServer(("", 0), _UDPHandler, bind_and_activate=False)
+    server.socket.close()
+    server.socket = socket.fromfd(fd, family, socket.SOCK_DGRAM)
+    os.close(fd)
+    server.serve_forever()
+
+
+def _start_receiver_process(server):
+    """Serve `server`'s socket from a child process. False where that cannot be done."""
+
+    if os.name != "posix":
+        return False
+
+    fd = server.socket.fileno()
+    slot = len(_receivers)
+    _receivers.append(server)       # the parent keeps its copy of the socket, so a child can be respawned
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    boot = "import sys; sys.path.insert(0, %r); from core.log import _receiver_main; _receiver_main(%d, %d, sys.argv[1])" % (root, fd, server.address_family)
+    settings = json.dumps(dict((_, config.get(_)) for _ in _RECEIVER_SETTINGS))
+
+    def spawn():
+        return subprocess.Popen([sys.executable, "-c", boot, settings], stdin=subprocess.PIPE, stdout=subprocess.PIPE, pass_fds=(fd,), close_fds=True)
+
+    def supervise(process):
+        while True:
+            for line in process.stdout:
+                try:
+                    status = json.loads(line.decode(UNICODE_ENCODING))
+                except ValueError:
+                    continue
+                with _sensor_status_lock:
+                    _receiver_status[slot] = status
+            code = process.wait()
+            log_error("event receiver process exited (code %s), restarting it" % code)
+            time.sleep(1)
+            try:
+                process = spawn()
+            except Exception as ex:
+                log_error("unable to restart the event receiver process (%s)" % ex)
+                return
+
+    process = spawn()
+    thread = threading.Thread(target=supervise, args=(process,))
+    thread.daemon = True
+    thread.start()
+    return True
+
+
+def start_logd(address=None, port=None, join=False):
+    # ONE receive loop, not a thread per datagram, and in its own process (see _receiver_main).
+    #
+    # This used to be a ThreadingUDPServer, so every event from every remote sensor cost a fresh thread -
+    # and because that thread was fresh, get_event_log_handle()'s thread-local fd cache could never hit, so
+    # each event also cost an open() and a close(). Measured against the real server on loopback, paced:
+    # 10,000/s lost 23.9%, unpaced 337k/s delivered 2.3%. One sequential loop with a cached handle holds
+    # 20,000/s with no loss - as long as nothing else in the process wants the interpreter.
+    #
+    # The socket is bound HERE, in the caller, so a port in use or a permission problem still fails
+    # start_logd() itself; the child only serves it.
+    if ':' in (address or ""):    # IPv6 support
+        address = address.strip("[]")
+        _LogUDPServer.address_family = socket.AF_INET6
+        _address = resolve_address(address, port)
+    else:
+        _LogUDPServer.address_family = socket.AF_INET
+        _address = (address or '', int(port) if str(port or "").isdigit() else 0)
+
+    server = _LogUDPServer(_address, _UDPHandler)
+
+    print("[i] running UDP server at '%s:%d'" % (server.server_address[0], server.server_address[1]))
+
+    if join:
+        server.serve_forever()
+    elif not _start_receiver_process(server):
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+
+def set_sigterm_handler():
+    def handler(signum, frame):
+        log_error("SIGTERM")
+        raise SystemExit
+
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handler)
+
+if __name__ != "__main__":
+    set_sigterm_handler()

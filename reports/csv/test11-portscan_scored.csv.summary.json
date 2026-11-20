@@ -1,0 +1,26 @@
+{
+  "input": "c:\\ML project 2\\reference\\StratosphereLinuxIPS\\dataset\\test11-portscan.binetflow",
+  "schema": "argus",
+  "policy": null,
+  "output": "c:\\ML project 2\\reports\\csv\\test11-portscan_scored.csv",
+  "warnings": [
+    "46 rows have no numeric port (ICMP ids): they take part only in the ICMP sweep rule"
+  ],
+  "rows": 66,
+  "rows_used_by_rules": 66,
+  "rows_ignored": 0,
+  "rows_without_numeric_port": 46,
+  "rows_with_clock_before_1990": 0,
+  "findings": 2,
+  "findings_table": "c:\\ML project 2\\reports\\csv\\test11-portscan_scored.findings.csv",
+  "hosts_flagged": 1,
+  "flows_in_findings": 66,
+  "rules": {
+    "window_s": 60.0,
+    "min_ports": 15,
+    "min_hosts": 15
+  },
+  "caution": "rule thresholds are defaults, not tuned or measured on labelled data",
+  "lines_skipped_malformed_or_unreadable": 0,
+  "seconds": 0.0
+}

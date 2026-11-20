@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layered-nids"
+version = "0.1.0"
+description = "Layered network intrusion detection: rules, DGA classifier, packet autoencoder ensemble, flow classifier, evidence fusion"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas", "scikit-learn", "scipy", "joblib", "torch", "scapy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["layered_nids*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["slow: needs the full datasets (deselect with -m 'not slow')"]

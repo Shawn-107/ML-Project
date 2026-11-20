@@ -1,0 +1,523 @@
+{
+ "data": {
+  "rows_in": 4090661,
+  "name_in_both_classes": 15513,
+  "duplicate_names_removed": 534120,
+  "rows_out": 3486415,
+  "per_family_cap": 300,
+  "n_legit": 20000,
+  "n_dga": 33620,
+  "n_families": 160
+ },
+ "fpr_target": 0.01,
+ "seeds": 2,
+ "quick": true,
+ "models": {
+  "ngram_tfidf_logreg": {
+   "random_split": {
+    "auc": {
+     "mean": 0.9652011597508603,
+     "std": 3.325669590770186e-06
+    },
+    "recall": {
+     "mean": 0.710390572753584,
+     "std": 0.024266736489360563
+    },
+    "false_alarm_rate": {
+     "mean": 0.013556784305466026,
+     "std": 0.004720631818720254
+    },
+    "brier": {
+     "mean": 0.0694622353968875,
+     "std": 2.682323647062307e-05
+    },
+    "ece": {
+     "mean": 0.028230533882951027,
+     "std": 0.0006166678732617975
+    }
+   },
+   "family_holdout": {
+    "auc": {
+     "mean": 0.9436666906294298,
+     "std": 0.023855584574499482
+    },
+    "recall": {
+     "mean": 0.5974537844831005,
+     "std": 0.08006972075191046
+    },
+    "false_alarm_rate": {
+     "mean": 0.009909575686603268,
+     "std": 0.0028013649500444188
+    },
+    "brier": {
+     "mean": 0.09073587861818248,
+     "std": 0.022787315607974208
+    },
+    "ece": {
+     "mean": 0.04208177375923705,
+     "std": 0.016361066197062457
+    }
+   },
+   "family_recall_mean_over_families": 0.5718337025010223,
+   "families_below_50pct_recall": 64,
+   "worst_10_families": [
+    [
+     "nymaim2",
+     0.0
+    ],
+    [
+     "tsifiri",
+     0.0
+    ],
+    [
+     "ud6",
+     0.0
+    ],
+    [
+     "vipersoftx",
+     0.0
+    ],
+    [
+     "magecart",
+     0.0
+    ],
+    [
+     "abcbot_subdomain",
+     0.0
+    ],
+    [
+     "tofsee",
+     0.0
+    ],
+    [
+     "volatilecedar",
+     0.0
+    ],
+    [
+     "downloader",
+     0.0
+    ],
+    [
+     "gozi",
+     0.0
+    ]
+   ],
+   "per_family_recall": {
+    "copperstealer": 0.967741935483871,
+    "cryptolocker": 0.665,
+    "diamondfox": 0.26190476190476186,
+    "flubot": 0.8366666666666667,
+    "hesperbot": 0.5589887640449438,
+    "kingminer": 1.0,
+    "madmax": 0.95,
+    "mirai": 0.6052631578947368,
+    "misfox": 0.6499999999999999,
+    "mydoomtid": 0.5,
+    "ngioweb": 0.013333333333333334,
+    "nymaim": 0.3833333333333333,
+    "nymaim2": 0.0,
+    "proslikefan": 0.365,
+    "pykspa2s": 0.5266666666666666,
+    "qadars": 0.6966666666666667,
+    "qsnatch": 0.13333333333333333,
+    "ramdo": 0.78,
+    "recjs_subdomain": 0.12166666666666666,
+    "runforestrun_subdomain": 0.98,
+    "tinba": 0.7166666666666667,
+    "tinyfluff": 0.195,
+    "toxicpanda": 0.5,
+    "tsifiri": 0.0,
+    "tufik": 0.8333333333333333,
+    "ud6": 0.0,
+    "vidro_subdomain": 1.0,
+    "vidrotid_subdomain": 1.0,
+    "vipersoftx": 0.0,
+    "virut": 0.11166666666666666,
+    "vo1d": 0.9916666666666667,
+    "zloader": 0.9483333333333334,
+    "abcbot": 0.08333333333333333,
+    "allasenha": 0.9666666666666667,
+    "bazarbackdoor": 0.4083333333333333,
+    "bigviktor": 0.0016666666666666668,
+    "carnavalheist": 0.9783333333333333,
+    "chinad": 0.9283333333333332,
+    "chir": 0.98,
+    "coffeeloader": 0.11666666666666667,
+    "darkcracks": 1.0,
+    "darkwatchman": 0.6233333333333333,
+    "dmsniff_subdomain": 0.7647058823529411,
+    "ekforward": 0.575,
+    "fobber": 0.7533333333333333,
+    "infy": 0.6966666666666668,
+    "locky": 0.5983333333333334,
+    "magecart": 0.0,
+    "makloader": 1.0,
+    "metastealer": 0.7816666666666667,
+    "oderoor": 0.5183333333333333,
+    "padcrypt": 0.605,
+    "qhost": 0.5777777777777777,
+    "ramnit": 0.6983333333333334,
+    "ranbyus": 0.8633333333333333,
+    "rovnix": 0.975,
+    "runforestrun": 0.8866666666666667,
+    "simda": 0.14833333333333332,
+    "sphinx": 0.875,
+    "szribi": 0.5085227272727273,
+    "tempedreve": 0.455,
+    "ud3": 0.7,
+    "vidrotid": 0.43,
+    "xxhex": 0.7766666666666666,
+    "abcbot_subdomain": 0.0,
+    "amadey": 0.2,
+    "bamital": 1.0,
+    "bigviktor_subdomain": 0.02,
+    "bobax": 0.745,
+    "calfbot_subdomain": 0.45,
+    "chaes_subdomain": 0.4107142857142857,
+    "coper": 1.0,
+    "corebot_subdomain": 1.0,
+    "darkshell": 0.23666666666666666,
+    "dyre": 1.0,
+    "ebury": 0.7366666666666666,
+    "errorfather": 1.0,
+    "feodo": 0.9230769230769231,
+    "g01": 0.13,
+    "gameover": 1.0,
+    "gameover_p2p_a0b92382": 0.99,
+    "mintsloader": 0.8133333333333334,
+    "mydoom": 0.455,
+    "shadowpad": 0.5,
+    "sharkbot": 0.990909090909091,
+    "shifu": 0.29666666666666663,
+    "sisron": 1.0,
+    "symmi": 0.2265625,
+    "symmi_subdomain": 0.77,
+    "tempedrevetdd": 0.41666666666666663,
+    "tinynuke": 1.0,
+    "tofsee": 0.0,
+    "vawtrak": 0.26,
+    "vidro": 0.3411764705882353,
+    "volatilecedar": 0.0,
+    "wd": 1.0,
+    "ares": 0.775,
+    "banjori": 0.021666666666666667,
+    "bedep": 0.7366666666666667,
+    "bumblebee": 0.725,
+    "dircrypt": 0.6933333333333334,
+    "downloader": 0.0,
+    "emotet": 0.835,
+    "flashback": 0.6666666666666666,
+    "gazavat": 0.16833333333333333,
+    "ghostweaver": 0.8933333333333333,
+    "gozi": 0.0,
+    "gspy": 0.9877551020408163,
+    "kfos": 0.0,
+    "matsnu": 0.0,
+    "mirainomi_subdomain": 0.7348484848484849,
+    "murofetweekly": 1.0,
+    "orchardgenesis_subdomain": 1.0,
+    "pandabanker": 0.8966666666666667,
+    "phorpiex": 0.4666666666666667,
+    "pitou": 0.08166666666666667,
+    "prometei": 0.02666666666666667,
+    "pseudomanuscrypt": 0.42166666666666663,
+    "pseudomanuscrypt_subdomain": 0.4,
+    "pushdotid": 0.46166666666666667,
+    "sinowal": 0.14393939393939395,
+    "suppobox": 0.0,
+    "ud2": 1.0,
+    "urlzone": 0.7116666666666667,
+    "vobfus": 0.0,
+    "vobfus_subdomain": 0.35350318471337583,
+    "xagent": 0.0078125,
+    "alien": 1.0,
+    "calfbot": 0.6,
+    "ccleaner": 0.75,
+    "chaes": 0.0,
+    "conficker": 0.375,
+    "corebot": 0.96,
+    "dmsniff": 0.3583333333333333,
+    "enviserv": 0.8383333333333334,
+    "fosniw": 0.0,
+    "ftcode": 0.7745098039215685,
+    "grandoreiro": 0.9633333333333334,
+    "lechiket": 0.385,
+    "m0yv": 0.31333333333333335,
+    "m0yvtdd": 0.29000000000000004,
+    "mirainomi": 1.0,
+    "monerominer": 0.9216666666666666,
+    "murofet": 0.8416666666666667,
+    "n3cr0m0rph": 0.7816666666666667,
+    "n3cr0m0rph_subdomain": 0.9233333333333333,
+    "necurs": 0.7666666666666666,
+    "oderoor_subdomain": 1.0,
+    "omexo": 1.0,
+    "orchard": 0.45666666666666667,
+    "orchard_subdomain": 0.9966666666666667,
+    "orchardgenesis": 0.515,
+    "pushdo": 0.20333333333333334,
+    "pykspa": 0.5033333333333334,
+    "pykspa2": 0.523109243697479,
+    "qakbot": 0.8166666666666667,
+    "redyms": 0.4411764705882353,
+    "ud8": 0.2727272727272727,
+    "verblecon": 1.0,
+    "zeroaccess": 0.23333333333333334
+   },
+   "seconds": 28.8
+  },
+  "lexical_rules": {
+   "random_split": {
+    "auc": {
+     "mean": 0.8123139434351947,
+     "std": 0.002210293111269357
+    },
+    "recall": {
+     "mean": 0.22921720285307143,
+     "std": 0.016863131625053096
+    },
+    "false_alarm_rate": {
+     "mean": 0.011425463112618942,
+     "std": 0.0033466951247370933
+    },
+    "brier": {
+     "mean": 0.27642371756835826,
+     "std": 0.0004320936388448049
+    },
+    "ece": {
+     "mean": 0.3030698406681509,
+     "std": 0.0006356463814013169
+    }
+   },
+   "family_holdout": {
+    "auc": {
+     "mean": 0.8092193605137293,
+     "std": 0.02731353424771973
+    },
+    "recall": {
+     "mean": 0.22636493967331103,
+     "std": 0.08242615320226483
+    },
+    "false_alarm_rate": {
+     "mean": 0.011444417437078459,
+     "std": 0.0028019167392297163
+    },
+    "brier": {
+     "mean": 0.27734569636509965,
+     "std": 0.02073420113215179
+    },
+    "ece": {
+     "mean": 0.30304189977062906,
+     "std": 0.022195446323061797
+    }
+   },
+   "family_recall_mean_over_families": 0.24859362589280817,
+   "families_below_50pct_recall": 123,
+   "worst_10_families": [
+    [
+     "cryptolocker",
+     0.0
+    ],
+    [
+     "flubot",
+     0.0
+    ],
+    [
+     "madmax",
+     0.0
+    ],
+    [
+     "mirai",
+     0.0
+    ],
+    [
+     "misfox",
+     0.0
+    ],
+    [
+     "mydoomtid",
+     0.0
+    ],
+    [
+     "nymaim",
+     0.0
+    ],
+    [
+     "nymaim2",
+     0.0
+    ],
+    [
+     "proslikefan",
+     0.0
+    ],
+    [
+     "pykspa2s",
+     0.0
+    ]
+   ],
+   "per_family_recall": {
+    "copperstealer": 0.9096774193548387,
+    "cryptolocker": 0.0,
+    "diamondfox": 0.09523809523809523,
+    "flubot": 0.0,
+    "hesperbot": 0.05898876404494382,
+    "kingminer": 0.8243243243243243,
+    "madmax": 0.0,
+    "mirai": 0.0,
+    "misfox": 0.0,
+    "mydoomtid": 0.0,
+    "ngioweb": 0.33,
+    "nymaim": 0.0,
+    "nymaim2": 0.0,
+    "proslikefan": 0.0,
+    "pykspa2s": 0.0,
+    "qadars": 0.08499999999999999,
+    "qsnatch": 0.0,
+    "ramdo": 0.0,
+    "recjs_subdomain": 0.0,
+    "runforestrun_subdomain": 0.28,
+    "tinba": 0.0,
+    "tinyfluff": 0.35333333333333333,
+    "toxicpanda": 1.0,
+    "tsifiri": 1.0,
+    "tufik": 0.0,
+    "ud6": 0.0,
+    "vidro_subdomain": 0.02,
+    "vidrotid_subdomain": 0.0,
+    "vipersoftx": 0.0,
+    "virut": 0.0,
+    "vo1d": 0.65,
+    "zloader": 0.07333333333333333,
+    "abcbot": 0.0,
+    "allasenha": 1.0,
+    "bazarbackdoor": 0.0,
+    "bigviktor": 0.0,
+    "carnavalheist": 0.995,
+    "chinad": 0.45166666666666666,
+    "chir": 0.94,
+    "coffeeloader": 1.0,
+    "darkcracks": 0.0,
+    "darkwatchman": 0.39166666666666666,
+    "dmsniff_subdomain": 0.0,
+    "ekforward": 0.35,
+    "fobber": 0.0033333333333333335,
+    "infy": 0.365,
+    "locky": 0.0016666666666666668,
+    "magecart": 1.0,
+    "makloader": 1.0,
+    "metastealer": 0.0,
+    "oderoor": 0.0,
+    "padcrypt": 0.0,
+    "qhost": 0.6222222222222222,
+    "ramnit": 0.0016666666666666668,
+    "ranbyus": 0.006666666666666667,
+    "rovnix": 0.5233333333333333,
+    "runforestrun": 0.0,
+    "simda": 0.0,
+    "sphinx": 0.0,
+    "szribi": 0.0,
+    "tempedreve": 0.0,
+    "ud3": 0.6,
+    "vidrotid": 0.0,
+    "xxhex": 0.43833333333333335,
+    "abcbot_subdomain": 0.0,
+    "amadey": 0.8,
+    "bamital": 1.0,
+    "bigviktor_subdomain": 0.04166666666666667,
+    "bobax": 0.0,
+    "calfbot_subdomain": 0.0,
+    "chaes_subdomain": 0.19047619047619047,
+    "coper": 1.0,
+    "corebot_subdomain": 0.8633333333333333,
+    "darkshell": 0.0,
+    "dyre": 1.0,
+    "ebury": 0.14,
+    "errorfather": 0.8225806451612904,
+    "feodo": 0.008097165991902834,
+    "g01": 0.0,
+    "gameover": 0.9966666666666667,
+    "gameover_p2p_a0b92382": 0.6633333333333333,
+    "mintsloader": 0.14333333333333334,
+    "mydoom": 0.0,
+    "shadowpad": 0.0,
+    "sharkbot": 0.8454545454545455,
+    "shifu": 0.0,
+    "sisron": 0.0,
+    "symmi": 0.0,
+    "symmi_subdomain": 0.0,
+    "tempedrevetdd": 0.0,
+    "tinynuke": 1.0,
+    "tofsee": 0.0,
+    "vawtrak": 0.0,
+    "vidro": 0.0,
+    "volatilecedar": 0.0,
+    "wd": 1.0,
+    "ares": 0.07500000000000001,
+    "banjori": 0.0016666666666666668,
+    "bedep": 0.0033333333333333335,
+    "bumblebee": 0.09333333333333334,
+    "dircrypt": 0.005,
+    "downloader": 0.0,
+    "emotet": 0.0,
+    "flashback": 0.0,
+    "gazavat": 0.0,
+    "ghostweaver": 0.265,
+    "gozi": 0.0,
+    "gspy": 0.9102040816326531,
+    "kfos": 0.0,
+    "matsnu": 0.0,
+    "mirainomi_subdomain": 0.42424242424242425,
+    "murofetweekly": 1.0,
+    "orchardgenesis_subdomain": 0.38,
+    "pandabanker": 0.7966666666666666,
+    "phorpiex": 0.0,
+    "pitou": 0.0,
+    "prometei": 0.0,
+    "pseudomanuscrypt": 0.0,
+    "pseudomanuscrypt_subdomain": 0.0,
+    "pushdotid": 0.0,
+    "sinowal": 0.0,
+    "suppobox": 0.0,
+    "ud2": 1.0,
+    "urlzone": 0.04,
+    "vobfus": 0.0,
+    "vobfus_subdomain": 0.0,
+    "xagent": 0.0390625,
+    "alien": 1.0,
+    "calfbot": 0.0,
+    "ccleaner": 0.25,
+    "chaes": 0.0,
+    "conficker": 0.0,
+    "corebot": 0.6516666666666666,
+    "dmsniff": 0.0,
+    "enviserv": 0.5716666666666667,
+    "fosniw": 0.0,
+    "ftcode": 0.0,
+    "grandoreiro": 1.0,
+    "lechiket": 0.0,
+    "m0yv": 0.0,
+    "m0yvtdd": 0.0,
+    "mirainomi": 0.5,
+    "monerominer": 0.8216666666666667,
+    "murofet": 0.0,
+    "n3cr0m0rph": 0.0,
+    "n3cr0m0rph_subdomain": 0.44,
+    "necurs": 0.06,
+    "oderoor_subdomain": 0.029411764705882353,
+    "omexo": 1.0,
+    "orchard": 0.475,
+    "orchard_subdomain": 0.4733333333333334,
+    "orchardgenesis": 0.4083333333333333,
+    "pushdo": 0.0,
+    "pykspa": 0.0,
+    "pykspa2": 0.0,
+    "qakbot": 0.175,
+    "redyms": 0.0,
+    "ud8": 0.0,
+    "verblecon": 1.0,
+    "zeroaccess": 0.0
+   },
+   "seconds": 0.5
+  }
+ }
+}

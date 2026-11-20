@@ -1,0 +1,230 @@
+{
+ "protocol": "Fusion ablation on the SIMULATED multi-layer scenarios (see fusion/simulate.py for what is real and what is not).\n\n   python -m layered_nids.fusion.ablation [--flow-model legacy|mean_ann_rf_gb|stack_ann_rf_gb] [--budget 0.5]\n\nProtocol:\n- Layer pools: L2 = n-gram LR on unseen DGA families (threshold at 1% false alarms on validation benign names);\n  L4 = a flow model's official-test scores (threshold at the 3% policy on validation Normal flows).\n- Three disjoint sets of scenarios: CALIBRATION (choose each method's alert parameter), TRAIN (fit the learned\n  combiner), TEST (report). Every method is calibrated to the SAME budget of false alerts on benign hosts per\n  host-day, so detection cannot be bought with extra false alarms.\n- Methods: single evidence cut-off (no accumulation), noisy-OR accumulation, accumulation needing 2 layers,\n  learned logistic-regression combiner. Layer sets: DGA only, flows only, both.\n",
+ "flow_model": "stack_ann_rf_gb",
+ "budget_false_alerts_per_host_day": 0.5,
+ "scenarios": {
+  "calibration": 20,
+  "train": 20,
+  "test": 20,
+  "hours": 2.0,
+  "hosts": "40 benign + 10 attackers"
+ },
+ "pools": {
+  "dga": {
+   "threshold": 0.8666952252388,
+   "nominal_fpr": 0.01,
+   "measured_fpr_on_held_out": 0.0103,
+   "measured_recall_on_held_out": 0.78344900289906
+  },
+  "flows": {
+   "threshold": 0.7531726213605711,
+   "nominal_fpr": 0.03,
+   "measured_fpr_on_held_out": 0.075821126669678,
+   "measured_recall_on_held_out": 0.8216721394291487
+  }
+ },
+ "results": {
+  "dga_only/cutoff_no_accumulation": {
+   "param": 0.999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 0.7049999999999998,
+    "std": 0.021794494717703384
+   },
+   "median_time_to_detect_s": {
+    "mean": 93.32870515393742,
+    "std": 34.20611161738894
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 0.465,
+    "std": 0.32136427928442834
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.038750000000000014,
+    "std": 0.026780356607035687
+   }
+  },
+  "dga_only/accumulate": {
+   "param": 0.99999,
+   "calibration_false_alerts_per_host_day": 0.045000000000000005,
+   "detection_rate": {
+    "mean": 0.6999999999999998,
+    "std": 1.1102230246251565e-16
+   },
+   "median_time_to_detect_s": {
+    "mean": 152.15128454774344,
+    "std": 33.02529967850609
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 0.045000000000000005,
+    "std": 0.10712142642814276
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.0037500000000000007,
+    "std": 0.008926785535678564
+   }
+  },
+  "dga_only/learned_combiner": {
+   "param": 0.9,
+   "calibration_false_alerts_per_host_day": 0.06000000000000001,
+   "detection_rate": {
+    "mean": 0.6999999999999998,
+    "std": 1.1102230246251565e-16
+   },
+   "median_time_to_detect_s": {
+    "mean": 293.9426315201443,
+    "std": 58.784688497409455
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 0.045000000000000005,
+    "std": 0.10712142642814276
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.0037500000000000007,
+    "std": 0.008926785535678564
+   }
+  },
+  "flows_only/cutoff_no_accumulation": {
+   "param": 0.999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 0.8700000000000001,
+    "std": 0.08426149773176358
+   },
+   "median_time_to_detect_s": {
+    "mean": 107.28854156511537,
+    "std": 45.01912548170369
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 27.165000000000003,
+    "std": 2.7124297225919047
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.825,
+    "std": 0.05863019699779287
+   }
+  },
+  "flows_only/accumulate": {
+   "param": 0.9999999999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 0.78,
+    "std": 0.0871779788708135
+   },
+   "median_time_to_detect_s": {
+    "mean": 193.64800265473923,
+    "std": 60.53379663776279
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 13.695000000000002,
+    "std": 3.695331514221695
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.32749999999999996,
+    "std": 0.05471517157059822
+   }
+  },
+  "flows_only/learned_combiner": {
+   "param": 0.9,
+   "calibration_false_alerts_per_host_day": 0.3450000000000001,
+   "detection_rate": {
+    "mean": 0.6199999999999999,
+    "std": 0.059999999999999984
+   },
+   "median_time_to_detect_s": {
+    "mean": 446.8829083768537,
+    "std": 61.91741809465534
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 0.27,
+    "std": 0.4337049688440288
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.013750000000000002,
+    "std": 0.01672386020032457
+   }
+  },
+  "both/cutoff_no_accumulation": {
+   "param": 0.999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 1.0,
+    "std": 0.0
+   },
+   "median_time_to_detect_s": {
+    "mean": 67.11706226004515,
+    "std": 16.365058245038398
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 27.555,
+    "std": 2.677027269192452
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.835,
+    "std": 0.058309518948452994
+   }
+  },
+  "both/accumulate": {
+   "param": 0.9999999999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 1.0,
+    "std": 0.0
+   },
+   "median_time_to_detect_s": {
+    "mean": 123.53776859595266,
+    "std": 25.602089607363048
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 24.57,
+    "std": 4.511884307027387
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.5225,
+    "std": 0.07862092596758194
+   }
+  },
+  "both/learned_combiner": {
+   "param": 0.95,
+   "calibration_false_alerts_per_host_day": 0.27,
+   "detection_rate": {
+    "mean": 0.985,
+    "std": 0.03570714214271424
+   },
+   "median_time_to_detect_s": {
+    "mean": 330.91490171621166,
+    "std": 51.91402389683966
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 0.22500000000000003,
+    "std": 0.20946360065653416
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.01875,
+    "std": 0.017455300054711177
+   }
+  },
+  "both/accumulate_needs_2_layers": {
+   "param": 0.9999999999,
+   "calibration_false_alerts_per_host_day": NaN,
+   "detection_rate": {
+    "mean": 1.0,
+    "std": 0.0
+   },
+   "median_time_to_detect_s": {
+    "mean": 124.91303127768995,
+    "std": 26.656000952911093
+   },
+   "benign_false_alerts_per_host_day": {
+    "mean": 23.160000000000004,
+    "std": 4.397431068248825
+   },
+   "benign_hosts_alerted_share": {
+    "mean": 0.50875,
+    "std": 0.082641923380328
+   }
+  }
+ },
+ "wall_seconds": 3751.0,
+ "caveat": "simulated hosts/timelines with real per-layer scores; layers independent by construction"
+}

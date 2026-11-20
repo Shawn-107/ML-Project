@@ -1,0 +1,22 @@
+{
+  "input": "c:\\ML project 2\\reports\\csv\\unsw_cleaned_test.csv",
+  "schema": "unsw34",
+  "policy": "fpr_1pct",
+  "output": "c:\\ML project 2\\reports\\csv\\unsw_cleaned_test_scored.csv",
+  "warnings": [],
+  "rows": 46830,
+  "flagged": 12139,
+  "flagged_share": 0.2592,
+  "severity": {
+    "high": 12139,
+    "medium": 0
+  },
+  "row_status": {
+    "ok": 46809,
+    "warn": 21
+  },
+  "rows_far_outside_training_range_share": 0.0004,
+  "caution": "trained on 2015 lab traffic; the official test set is distribution-shifted from training, so expect about 7% false alarms at the 3% policy",
+  "lines_skipped_malformed_or_unreadable": 0,
+  "seconds": 2.3
+}

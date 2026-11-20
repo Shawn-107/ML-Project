@@ -1,0 +1,38 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/dga/*.csv
+data/kitsune/
+data/unsw/*.csv
+reference/
+legacy/original_artifacts/
+*.joblib
+*.pt
+
+# --- added for the public repo ---
+.venv313/
+.runtime/
+*.egg-info/
+# datasets are large and have their own licences: only the sources note is kept
+data/*
+!data/SOURCES.md
+# model files are pickles: rebuild them with the training commands, never publish or load strangers' pickles
+models/**/*.joblib
+legacy/models_backup_sklearn19/
+# score caches (rebuilt by the pipeline)
+*.npz
+!tests/data/*.npz
+# dashboard: local password and config, live logs
+tools/maltrail_ui/PASSWORD.txt
+tools/maltrail_ui/server.conf
+tools/maltrail_ui/server.out
+tools/maltrail_ui/logs/
+# captures, runtime logs, editor files
+*.pcap
+*.log
+*.err
+.claude/
+# third-party dataset copies and files derived from them (UNSW-NB15, Slips samples): get them from the sources in data/SOURCES.md
+legacy/nids_backend/data/*.csv
+reports/csv/*.csv

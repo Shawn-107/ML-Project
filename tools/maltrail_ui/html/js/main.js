@@ -1,0 +1,3609 @@
+/* Maltrail v2 — vanilla presentation layer (no jQuery/DataTables).
+   Parses the event log (same space-delimited 11-col contract), aggregates into threats, renders an interactive
+   grid + stat tiles. Threat-UID uses canonical murmur3 (verify byte-compat with thirdparty.min.js before
+   production integration — see journal). */
+(function () {
+  "use strict";
+
+  // Server-injected IP→alias map (httpd.py rewrites this exact line for /js/main.js when config.IP_ALIASES is set).
+  // Keep the declaration on its own line and byte-for-byte matchable by /\bvar IP_ALIASES =.+/.
+  var IP_ALIASES = {};
+
+  // The parser and the aggregator live in js/engine.js, shared with the worker that runs them off
+  // the main thread; the names below are the ones this file always used.
+  var E = window.MT_ENGINE;
+  var murmur3 = E.murmur3, threatUID = E.threatUID, setList = E.setList, charTrim = E.charTrim, normTrail = E.normTrail, severityOf = E.severityOf,
+      parseEvents = E.parseEvents, aggregate = E.aggregate, aggregateRows = E.aggregateRows, mergeRows = E.mergeRows, MAX_CONDENSED = E.MAX_CONDENSED;
+  // Severity is the server's policy (REMOTE_SEVERITY_REGEX), served in <meta name="mt-severity">
+  // and compiled by the engine; see engine.js for why there is no second copy of it here.
+  var SEV_RAW = (function () {
+    var raw = "";
+    try {
+      var tag = document.querySelector('meta[name="mt-severity"]');
+      raw = (tag && tag.content) || "";
+      // Opened from disk (or from a build that forgot to substitute): the template token lands in
+      // the attribute verbatim, because a parser only drops "<!...!>" in element CONTENT. Compared
+      // exactly rather than by prefix - a regex is free to start with "<!" and would have been
+      // thrown away.
+      if (raw === "<!SEVERITY!>") raw = "";
+    } catch (e) { raw = ""; }
+    return raw;
+  })();
+  E.setSeverity(SEV_RAW);
+
+  // CSS-escape a value used inside an attribute selector ([data-ip="..."]); raw log fields can contain "/]/\ which throw
+  function cssEsc(s) { s = "" + s; return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\\]\[]/g, "\\$&"); }
+  // performance.now() where available; Date.now() is enough for the millisecond thresholds we use it for
+  function _now() { return (window.performance && performance.now) ? performance.now() : +new Date(); }
+
+  // legacy Maltrail type colors (PREFERRED_TRAIL_COLORS + Google palette for the rest): blue DNS, red IP, etc.
+  var TYPE_COLORS = { DNS: "#3366cc", IP: "#dc3912", URL: "#ff9900", UA: "#990099", HTTP: "#109618", TCP: "#0099c6", UDP: "#dd4477", PORT: "#0f9b8e", IPORT: "#8d6e63", PATH: "#5c6bc0", CERT: "#827717", JA3: "#ab47bc", JA4: "#ab47bc" };   /* the two TLS client fingerprints share a chip colour - same kind of indicator, and the label already says which */   /* olive: furthest in Lab from all of the above (dE 42), 4.56:1 under the chip's white text, and reads against both the dark and light surface */
+  // Threat class = the trailing "(malware)|(malicious)|(suspicious)" in the info field, shown as a
+  // color-coded icon (word in the tooltip) instead of raw paren text. Icons are the official Lucide set
+  // (biohazard / skull / circle-question-mark), path data inlined so it stays offline/CSP-safe — currentColor per class.
+  var _lucideTag = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+  var CLASS_ICON = {
+    malware: _lucideTag + '<circle cx="12" cy="11.9" r="2"/><path d="M6.7 3.4c-.9 2.5 0 5.2 2.2 6.7C6.5 9 3.7 9.6 2 11.6"/><path d="m8.9 10.1 1.4.8"/><path d="M17.3 3.4c.9 2.5 0 5.2-2.2 6.7 2.4-1.2 5.2-.6 6.9 1.5"/><path d="m15.1 10.1-1.4.8"/><path d="M16.7 20.8c-2.6-.4-4.6-2.6-4.7-5.3-.2 2.6-2.1 4.8-4.7 5.2"/><path d="M12 13.9v1.6"/><path d="M13.5 5.4c-1-.2-2-.2-3 0"/><path d="M17 16.4c.7-.7 1.2-1.6 1.5-2.5"/><path d="M5.5 13.9c.3.9.8 1.8 1.5 2.5"/></svg>',
+    malicious: _lucideTag + '<path d="m12.5 17-.5-1-.5 1h1z"/><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="12" r="1"/></svg>',
+    suspicious: _lucideTag + '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+    custom: _lucideTag + '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>'   // Lucide user-round: the operator's own trail (#19623)
+  };
+  // Feed infos that carry no trailing class marker, mapped to the class they belong to. Static
+  // trail files get "<filename> (<category>)" for free, and the heuristics all say "(suspicious)",
+  // but the feeds never adopted the convention: urlhaus has read "malware" since 2018 and openphish
+  // "phishing" since 2015. Those strings are matched by other people's tooling, so the class is
+  // inferred for the ICON here rather than by rewriting eleven-year-old output. Substrings, first
+  // match wins. severityOf() reads the info separately and is deliberately untouched by this - none
+  // of these severities move (#19621).
+  var UNMARKED_INFO_CLASS = [["malware", "malware"], ["phishing", "malicious"],
+    ["attacker", "suspicious"], ["reputation", "suspicious"], ["spammer", "suspicious"],
+    ["crawler", "suspicious"]];
+  // Custom trails take their file name as info, so they carry no marker: the reference says what they are.
+  function classOf(info, ref) {
+    var text = "" + info, m = text.match(/\(([^)]+)\)\s*$/);
+    if (m) {
+      var c = m[1].toLowerCase().trim();
+      if (CLASS_ICON[c]) return c;
+    }
+    if (("" + (ref || "")).indexOf("custom") >= 0) return "custom";
+    var lower = text.toLowerCase();
+    for (var i = 0; i < UNMARKED_INFO_CLASS.length; i++)
+      if (lower.indexOf(UNMARKED_INFO_CLASS[i][0]) >= 0) return UNMARKED_INFO_CLASS[i][1];
+    return null;
+  }
+  // small "local network" icon (Lucide network) shown beside private/LAN IPs, like the legacy lan.gif
+  var LAN_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>';
+  function isPrivIP(ip) { return /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && !isPubIP(ip); }   // valid IPv4 in a private/reserved range
+  var sevName = function (s) { return s === 3 ? "high" : s === 2 ? "medium" : "low"; };
+  var sevClass = function (s) { return s === 3 ? "h" : s === 2 ? "m" : "l"; };
+  // ---- inline Lucide glyphs (offline/CSP-safe, currentColor) for type / severity / ATT&CK tactic / drawer headers ----
+  function _lu(p, sz) { return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="' + sz + '" height="' + sz + '" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + "</svg>"; }
+  var TYPE_ICON_P = {
+    DNS: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+    IP: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/>',
+    URL: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    HTTP: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    UA: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    PORT: '<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+    PATH: '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>'
+  };
+  TYPE_ICON_P.IPORT = '<rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6.01 18H6"/><path d="M10.01 18H10"/><path d="M15 10v4"/><path d="M17.84 7.17a4 4 0 0 0-5.66 0"/><path d="M20.66 4.34a8 8 0 0 0-11.31 0"/>';   // router (IP:port endpoint), distinct from PORT's plug
+  TYPE_ICON_P.CERT = '<path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/><circle cx="12" cy="8" r="6"/>';   // award/seal: a TLS server certificate, unlike any other glyph here
+  TYPE_ICON_P.TCP = TYPE_ICON_P.UDP = '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>';
+  function typeIcon(t) { var p = TYPE_ICON_P[t]; return p ? '<span class="ticon">' + _lu(p, 12) + "</span>" : ""; }
+  var SEV_ICON_P = {
+    3: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',   // triangle-alert
+    2: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',                                                       // circle-alert
+    1: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'                                                        // info
+  };
+  function sevIcon(s) { return '<span class="sicon">' + _lu(SEV_ICON_P[s] || SEV_ICON_P[1], 11) + "</span>"; }
+  var TACTIC_ICON_P = {
+    "Command & Control": '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/>',
+    "Reconnaissance": '<circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>',
+    "Impact": '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    "Initial Access": '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/>',
+    "Persistence": '<path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/><circle cx="12" cy="5" r="3"/>',
+    "Credential Access": '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>'
+  };
+  function tacticIcon(name) { var p = TACTIC_ICON_P[name]; return p ? _lu(p, 11) + " " : ""; }
+  var HDR_ICON = {
+    note: '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/>',
+    related: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
+    sources: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+    destinations: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    ports: TYPE_ICON_P.PORT,
+    protocols: '<rect width="8" height="6" x="2" y="4" rx="1"/><rect width="8" height="6" x="14" y="14" rx="1"/><path d="M6 10v3a1 1 0 0 0 1 1h11"/>',
+    tags: '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    events: '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>'
+  };
+  function hdrIcon(k) { return '<span class="h4icon">' + _lu(HDR_ICON[k], 13) + "</span>"; }
+  // trail ORIGIN (from the event's reference field) - restores the at-a-glance "static list vs heuristic vs feed
+  // vs custom" cue in the table. static=curated list (database), heuristic=behavioural (activity/pulse),
+  // feed=external subscription (rss), custom=operator-defined (wrench). Colour-coded + titled, small & muted.
+  var ORIGIN = {
+    heuristic: { t: "heuristic (behavioural detection)", p: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>' },
+    custom: { t: "custom (your own trail)", p: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>' },
+    static: { t: "static (bundled trail list)", p: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>' },
+    feed: { t: "feed (external subscription)", p: '<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>' }
+  };
+  function originClass(ref) {
+    var r = ("" + (ref || "")).toLowerCase();
+    if (r.indexOf("heuristic") >= 0) return "heuristic";
+    if (r.indexOf("custom") >= 0) return "custom";
+    if (r.indexOf("static") >= 0) return "static";
+    return r ? "feed" : null;   // any other reference value == a feed's own citation
+  }
+  function originGlyph(ref) {
+    var c = originClass(ref); if (!c) return "";
+    return '<span class="origin origin-' + c + '" title="source: ' + ORIGIN[c].t + '">' + _lu(ORIGIN[c].p, 12) + "</span>";
+  }
+  var sevColor = function (s) { return s === 3 ? "#F43F5E" : s === 2 ? "#F59E0B" : "#64748B"; };
+
+  // contrast-aware label text for FILLED chips: pick whichever of white/near-black has the better WCAG contrast
+  // against the fill (more correct than a YIQ threshold). Returns "#ffffff" or "#0b1220".
+  function _lum(r, g, b) { function f(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); } return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); }
+  function _bestText(r, g, b) { var L = _lum(r, g, b); return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.056) ? "#ffffff" : "#0b1220"; }
+  function _hslRgb(h, s, l) {
+    var c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2, r, g, b;
+    if (h < 60) { r = c; g = x; b = 0; } else if (h < 120) { r = x; g = c; b = 0; } else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; } else if (h < 300) { r = x; g = 0; b = c; } else { r = c; g = 0; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  function hexText(hex) { hex = ("" + hex).replace("#", ""); return _bestText(parseInt(hex.substr(0, 2), 16), parseInt(hex.substr(2, 2), 16), parseInt(hex.substr(4, 2), 16)); }
+  function hslText(h, s, l) { var c = _hslRgb(h, s, l); return _bestText(c[0], c[1], c[2]); }
+  function ltClass(color) { return color === "#ffffff" ? "lt-w" : "lt-d"; }   // text-outline direction (legacy 4-way outline) for legibility on mid-tones
+  // per-threat color (deterministic): used by the threat-id chip fill, the Threats donut, and the mini — kept identical
+  function uidHue(uidc) { return (murmur3(uidc, 7) >>> 0) % 360; }
+  function uidColor(uidc) { return "hsl(" + uidHue(uidc) + ",60%,48%)"; }
+  function uidText(uidc) { return hslText(uidHue(uidc), 0.60, 0.48); }
+  function otherColor() { return document.body.classList.contains("light") ? "#aeb9c7" : "#3a4a63"; }   // "other" donut slice — softer slate in light (dark gray clashed on white)
+  function hms(t) { var m = /(\d{2}):(\d{2}):(\d{2})/.exec(t); return m ? m[0] : t; }
+  // "ip:port", or just the address when the protocol has no ports (ICMP logs an empty port field)
+  function hostPort(ip, port) { return esc(ip) + (port === "" || port == null ? "" : ":" + esc(port)); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+  // Memoized like normTrail above, and for the same reason: this is called from inside the sort
+  // comparator, twice per comparison, so sorting by source or destination ran it ~4M times on a
+  // busy day - a regex match, two array allocations and a per-octet string concat each time. That
+  // single column took 780ms while every other column took under 100. Distinct addresses are few
+  // relative to comparisons, so the cache is small and hits almost always; bounded the same way
+  // normTrail's is, in case a day brings pathologically many.
+  var _ipkCache = new Map();
+  function ipKey(s) {
+    var c = _ipkCache.get(s);
+    if (c !== undefined) return c;
+    c = ((s || "").match(/\d+/g) || []).map(function (n) { return ("00" + n).slice(-3); }).join(".");
+    if (_ipkCache.size > 200000) _ipkCache.clear();
+    _ipkCache.set(s, c);
+    return c;
+  }
+
+  // Dense inline 24h activity sparkline for a table row — a string of <rect> bars (one per hour of the day)
+  // as an SVG, so it drops straight into the row HTML with no per-row canvas. Empty hours draw nothing; the
+  // busiest hour is drawn full-height. ~50×13px so it fits the events cell without widening the row height.
+  function rowSpark(hours) {
+    if (!hours) return "";
+    var max = 1, i, total = 0;
+    for (i = 0; i < 24; i++) { if (hours[i] > max) max = hours[i]; total += hours[i]; }
+    if (!total) return "";
+    var bw = 1.6, gap = 0.5, H = 13, W = 24 * (bw + gap), bars = "", peakH = 0, peakHr = 0;
+    for (i = 0; i < 24; i++) {
+      if (hours[i] > peakH) { peakH = hours[i]; peakHr = i; }
+      var x = (i * (bw + gap)).toFixed(2);
+      if (hours[i] <= 0) { bars += '<rect class="z" x="' + x + '" y="' + (H - 1.2).toFixed(1) + '" width="' + bw + '" height="1.2"/>'; continue; }   // empty hour: baseline dot so the full 0-24h axis always shows
+      var bh = Math.max(2, hours[i] / max * (H - 1)), y = (H - bh).toFixed(2);
+      bars += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + bh.toFixed(2) + '"' + (hours[i] === max ? ' class="pk"' : '') + '/>';
+    }
+    var hh = (peakHr < 10 ? "0" : "") + peakHr;
+    return '<svg class="rowspark" viewBox="0 0 ' + W.toFixed(1) + ' ' + H + '" width="' + Math.round(W) + '" height="' + H + '" aria-hidden="true"><title>24h activity — peak ' + peakH + '/h at ' + hh + ':00</title>' + bars + '</svg>';
+  }
+
+  function spark(cv, data, color) {
+    var dpr = window.devicePixelRatio || 1, w = 64, h = 22;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var max = Math.max.apply(null, data.concat([1])), bw = w / data.length;
+    for (var i = 0; i < data.length; i++) {
+      var bh = Math.max(2, (data[i] / max) * h);
+      ctx.fillStyle = color; ctx.globalAlpha = 0.35 + 0.65 * (data[i] / max);
+      ctx.fillRect(i * bw + 1, h - bh, Math.max(1, bw - 1.5), bh);
+    }
+  }
+
+  // mini line sparkline — the minified form of a line chart (Events expands to a multi-line-by-type chart)
+  function sparkLine(cv, data, color) {
+    var dpr = window.devicePixelRatio || 1, w = 64, h = 22, pad = 2;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var max = Math.max.apply(null, data.concat([1])), n = data.length, gx = (w - pad * 2) / (n - 1 || 1);
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.beginPath();
+    for (var i = 0; i < n; i++) { var x = pad + gx * i, y = h - pad - (h - pad * 2) * (data[i] / max); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    ctx.stroke();
+    ctx.lineTo(pad + gx * (n - 1), h); ctx.lineTo(pad, h); ctx.closePath(); ctx.globalAlpha = 0.13; ctx.fillStyle = color; ctx.fill();   // soft area fill
+  }
+  // mini multi-line — the minified form of the full Events chart: same per-type series + colors, shared y-scale,
+  // and each line STOPS at the last hour with data (no flat-zero tail), exactly like drawLines.
+  function sparkLines(cv, series) {
+    var dpr = window.devicePixelRatio || 1, w = 64, h = 22, pad = 2;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var max = 1, lastIdx = 0;
+    series.forEach(function (s) { s.data.forEach(function (v, i) { if (v > max) max = v; if (v > 0) lastIdx = Math.max(lastIdx, i); }); });
+    var gx = (w - pad * 2) / 23;   // x maps hours 0..23 across the width (matches the full chart)
+    series.forEach(function (s, si) {
+      ctx.strokeStyle = s.c || PALETTE[si % PALETTE.length]; ctx.lineWidth = 1; ctx.lineJoin = "round"; ctx.globalAlpha = 0.95; ctx.beginPath();
+      for (var i = 0; i <= lastIdx; i++) { var x = pad + gx * i, y = h - pad - (h - pad * 2) * (s.data[i] / max); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+      ctx.stroke();
+    });
+  }
+  // like spark() but each bar takes its own palette color — for categorical minis (Sources) that match a multicolor big chart
+  function sparkMulti(cv, data) {
+    var dpr = window.devicePixelRatio || 1, w = 64, h = 22;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var max = Math.max.apply(null, data.concat([1])), bw = w / data.length;
+    for (var i = 0; i < data.length; i++) {
+      var bh = Math.max(2, (data[i] / max) * h);
+      ctx.fillStyle = PALETTE[i % PALETTE.length]; ctx.globalAlpha = 0.55 + 0.45 * (data[i] / max);
+      ctx.fillRect(i * bw + 1, h - bh, Math.max(1, bw - 1.5), bh);
+    }
+  }
+  function threatHay(th) {
+    return (th.uidc + " " + setList(th.srcS).join(" ") + " " + setList(th.dstS).join(" ") + " " +
+            setList(th.sportS).join(" ") + " " + setList(th.dportS).join(" ") + " " + setList(th.protoS).join(" ") + " " + setList(th.sensorS).join(" ") + " " +
+            th.type + " " + th.trail + " " + th.info + " " + th.ref + " " + sevName(th.sev)).toLowerCase();
+  }
+
+  function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : "" + n; }
+  // exact integer with thousands separators (deterministic "," grouping — no locale ambiguity); for the big stat counts
+  function fmtN(n) { return ("" + n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  // Log timestamps are written in the SENSOR's local time. The server injects its UTC offset (minutes east) into
+  // <body data-tz>, so "x ago" / spans are correct even when the viewer's timezone differs from the sensor's.
+  // Unknown (demo / file:// / pre-token build) -> interpret as the viewer's local time (prior behavior, no drift vs itself).
+  var _srvTz;
+  function srvTz() { if (_srvTz !== undefined) return _srvTz; var v = null; try { var b = document.body && document.body.getAttribute("data-tz"); if (b && /^-?\d+$/.test(b.trim())) v = parseInt(b, 10); } catch (e) {} _srvTz = v; return v; }
+  function parseTs(t) {
+    var m = ("" + t).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/); if (!m) return null;
+    var tz = srvTz();
+    if (tz == null) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();   // unknown -> viewer-local
+    return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) - tz * 60000;                // sensor-local components -> true UTC epoch
+  }
+  function durationStr(a, b) {
+    var pa = parseTs(a), pb = parseTs(b); if (pa == null || pb == null) return "";
+    var s = Math.max(0, Math.round((pb - pa) / 1000));
+    return s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h";
+  }
+  // "12s / 3m / 5h ago" for events within the last 24h (great for live); null => caller shows the absolute time
+  function relAge(ts) {
+    var p = parseTs(ts); if (p == null) return null;
+    var now = (DEMO && state._demoNow) ? state._demoNow : +new Date();
+    var s = Math.floor((now - p) / 1000); if (s < 0) s = 0;
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return null;
+  }
+  function refreshRelTimes() {   // tick the relative labels in place so live stays fresh between renders
+    var els = document.querySelectorAll('#rows .reltime[data-ts]');
+    for (var i = 0; i < els.length; i++) { var ts = els[i].getAttribute('data-ts'), a = relAge(ts); els[i].textContent = a || hms(ts); }
+  }
+
+  // severity mini bar: width of each segment is PROPORTIONAL to its count, and a ZERO count draws NO segment
+  // (the old `count || 1` fallback drew a full-flex bar for 0 -> e.g. 2hi/1md/0lo wrongly showed a "low" segment).
+  function sevPillrow(sev) {
+    var cols = ["var(--sev-high)", "var(--sev-med)", "var(--sev-low)"], out = "";
+    for (var i = 0; i < 3; i++) if (sev[i] > 0) out += '<i style="background:' + cols[i] + ';flex:' + sev[i] + '"></i>';
+    return '<div class="sev-pillrow">' + (out || '<i style="background:var(--line-solid);flex:1"></i>') + "</div>";   // all-zero -> one muted bar (not empty)
+  }
+  function renderStats(d) {
+    var domSev = d.sevCount[3] >= d.sevCount[2] && d.sevCount[3] >= d.sevCount[1] ? "high"
+               : d.sevCount[2] >= d.sevCount[1] ? "medium" : "low";
+    // each mini previews the chart its card opens: Threats/Sources/Trails => top-N magnitude bars
+    // (the same data the big donut/bars chart draws), Events => 24h volume, Severity => hi/md/lo split.
+    var vals = function (obj, n) { return topN(obj, n, d.events).items.map(function (x) { return x[1]; }); };
+    // Each mini mirrors the chart its card opens: Threats/Trails = donut, Sources = multicolor bars,
+    // Severity = hi/md/lo split pill-row, Events = the SAME multi-line-by-type series as its full chart.
+    var topThreats = d.threats.slice().sort(function (a, b) { return b.count - a.count; });
+    var threatSlices = topThreats.slice(0, 6).map(function (t) { return { v: t.count, c: uidColor(t.uidc) }; });
+    var tOther = topThreats.slice(6).reduce(function (s, t) { return s + t.count; }, 0); if (tOther) threatSlices.push({ v: tOther, c: otherColor() });
+    var trN = topN(d.trailCounts, 6, d.events), trailSlices = trN.items.map(function (x, i) { return { v: x[1], c: PALETTE[i % PALETTE.length] }; });
+    if (trN.other) trailSlices.push({ v: trN.other, c: otherColor() });
+    var etypes = Object.keys(d.typeHours).sort(function (a, b) { return d.typeCounts[b] - d.typeCounts[a]; }).slice(0, 5);
+    var eseries = etypes.map(function (t, i) { return { data: d.typeHours[t], c: TYPE_COLORS[t] || PALETTE[i] }; });
+    var cards = [
+      { lbl: "Threats", num: fmtN(d.threats.length), sub: "distinct threats", donut: threatSlices.length ? threatSlices : null, color: "#38BDF8", data: vals(d.srcCounts, 18) },
+      { lbl: "Events", num: fmtN(d.events), sub: "across 24h", lines: eseries.length ? eseries : null, color: "#6366F1", data: d.hours },
+      { lbl: "Severity", num: domSev, sub: d.sevCount[3] + " hi · " + d.sevCount[2] + " md · " + d.sevCount[1] + " lo",
+        sev: [d.sevCount[3], d.sevCount[2], d.sevCount[1]] },
+      { lbl: "Sources", num: fmtN(d.sources), sub: "distinct src IPs", multi: true, color: "#34D399", data: vals(d.srcCounts, 18) },
+      { lbl: "Trails", num: fmtN(d.trailsN), sub: "distinct indicators", donut: trailSlices.length ? trailSlices : null, color: "#A78BFA", data: vals(d.trailCounts, 18) }
+    ];
+    var sc = document.getElementById("stats"); sc.innerHTML = "";
+    cards.forEach(function (s) {
+      var el = document.createElement("div"); el.className = "card"; el.dataset.chart = s.lbl;
+      el.onclick = function () { showChart(s.lbl); };
+      el.innerHTML = '<span class="tick"></span><div class="lbl">' + s.lbl + '</div><div class="num">' + s.num +
+        '</div><div class="sub">' + s.sub + '</div>' +
+        (s.sev ? sevPillrow(s.sev) : '<canvas></canvas>');
+      sc.appendChild(el);
+      var cv = el.querySelector("canvas"); if (cv) { if (s.donut) miniDonut(cv, s.donut); else if (s.lines) sparkLines(cv, s.lines); else if (s.multi) sparkMulti(cv, s.data); else spark(cv, s.data, s.color); }
+    });
+  }
+
+  // Rebuild the dashboard aggregate from a FILTERED threat list so the 5 cards + open chart report only what's
+  // shown, not the whole day. Threats / Severity / Events / Trails are exact (rebuilt from each threat's stored
+  // per-hour counts + trail). Sources are approximate: per-src event counts aren't kept per threat (srcS is a
+  // capped distinct set), so events attribute to each threat's PRIMARY src; the distinct-source COUNT uses the union.
+  function buildViewAgg(list) {
+    var srcCounts = new Map(), trailCounts = new Map(), typeHours = {}, typeCounts = {},
+        hours = new Array(24).fill(0), sevCount = { 1: 0, 2: 0, 3: 0 }, srcDistinct = new Set(), events = 0;
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i], th = t.hours;
+      events += t.count; sevCount[t.sev] = (sevCount[t.sev] || 0) + 1;
+      for (var h = 0; h < 24; h++) hours[h] += th[h];
+      typeCounts[t.type] = (typeCounts[t.type] || 0) + t.count;
+      var tph = typeHours[t.type] || (typeHours[t.type] = new Array(24).fill(0));
+      for (var h2 = 0; h2 < 24; h2++) tph[h2] += th[h2];
+      var nt = normTrail(t.trail); trailCounts.set(nt, (trailCounts.get(nt) || 0) + t.count);
+      srcCounts.set(t.src, (srcCounts.get(t.src) || 0) + t.count);
+      if (t.srcS && t.srcS.vals) t.srcS.vals.forEach(function (x) { srcDistinct.add(x); });
+    }
+    return { threats: list, events: events, hours: hours, srcCounts: srcCounts, sources: srcDistinct.size || srcCounts.size,
+             trailCounts: trailCounts, trailsN: trailCounts.size, typeHours: typeHours, typeCounts: typeCounts, sevCount: sevCount, _view: true };
+  }
+  // signature of the active filter inputs — used to re-render the cards/chart only when the filtered SET changes
+  function statsFilterSig() {
+    return (state.input || "") + "" + (state.sev == null ? "" : state.sev) + "" +
+           (state.filters || []).join("") + "" + (state.showHidden ? "1" : "0") + "" +
+           wlCount() + "" + Object.keys(state.hidden || {}).length;
+  }
+
+  // ---- canvas charts (no D3 / Chart.js) ----
+  var PALETTE = ["#38BDF8", "#A78BFA", "#34D399", "#F472B6", "#FBBF24", "#22D3EE", "#F43F5E", "#818CF8", "#FB923C", "#2DD4BF"];
+  // m is a Map<key,count> (srcCounts / trailCounts). `total` is the sum of every count in the
+  // map, which is the aggregate's event count: when the day is built by the worker the page only
+  // holds the map's top entries, and "other" has to come from the total rather than the rest.
+  function topN(m, n, total) {
+    var arr = []; m.forEach(function (v, k) { arr.push([k, v]); }); arr.sort(function (a, b) { return b[1] - a[1]; });
+    if (arr.length <= n) return { items: arr, other: 0 };
+    var items = arr.slice(0, n), top = items.reduce(function (s, x) { return s + x[1]; }, 0);
+    return { items: items, other: total != null ? total - top : arr.slice(n).reduce(function (s, x) { return s + x[1]; }, 0) };
+  }
+  function cctx(cv) { var dpr = window.devicePixelRatio || 1; cv.width = cv._w * dpr; cv.height = cv._h * dpr; cv.style.width = cv._w + "px"; cv.style.height = cv._h + "px"; var c = cv.getContext("2d"); c.scale(dpr, dpr); return c; }
+  function themeColors() {
+    var cs = getComputedStyle(document.body), g = function (n, fb) { var v = (cs.getPropertyValue(n) || "").trim(); return v || fb; };
+    return { surface: g("--surface", "#161D2B"), text: g("--text", "#E6EDF3"), muted: g("--muted", "#8A97AD"), faint: g("--faint", "#5A6678"), line: g("--line-solid", "#273145") };
+  }
+  // Where the disc and its legend column sit horizontally. The pair used to be nailed to the left
+  // edge (cx = h/2 + 6), which is invisible in a narrow panel and glaring in a wide one: disc on the
+  // far left, legend beside it, half the canvas empty. Measure the widest legend row, then centre
+  // the whole block. `fs` is the legend's font size — it has to be the one the caller then draws
+  // with, or the measurement is off. Type sizes scale with the disc; see donutType().
+  function donutPlacement(ctx, cv, slices, R, fs) {
+    ctx.font = (fs || 12) + "px ui-monospace,monospace";
+    var colw = 0, n = Math.min(slices.length, 11);
+    slices.slice(0, n).forEach(function (s) {
+      var k = s.k.length > 24 ? s.k.slice(0, 23) + "…" : s.k;
+      colw = Math.max(colw, 16 + ctx.measureText(k + "   " + s.v).width);
+    });
+    colw += 26;
+    // A tall disc next to one thin column of ten rows reads as lopsided. With room, split the legend
+    // into two columns: the block gets wider and shorter, which sits better beside the circle.
+    var cols = (cv._w >= 1100 && n > 6) ? 2 : 1, rows = Math.ceil(n / cols);
+    var lw = cols * colw - 26, block = R * 2 + 26 + lw, x0 = Math.max(6, (cv._w - block) / 2);
+    return { cx: x0 + R, lx: x0 + R * 2 + 26, colw: colw, cols: cols, rows: rows };
+  }
+  // The legend column(s) beside a donut. Shared so the static and interactive donuts cannot drift.
+  function paintDonutLegend(ctx, tc, P, T, cy, slices, hovered) {
+    var n = Math.min(slices.length, 11), hits = [];
+    var top = Math.max(T.row / 2 + 4, cy - P.rows * T.row / 2 + T.row / 2);   // centred against the disc
+    slices.slice(0, n).forEach(function (s, i) {
+      var x = P.lx + Math.floor(i / P.rows) * P.colw, y = top + (i % P.rows) * T.row;
+      ctx.fillStyle = s.c || PALETTE[i % PALETTE.length]; ctx.fillRect(x, y - T.fs / 2 - 1, T.fs - 2, T.fs - 2);
+      ctx.fillStyle = tc.text; ctx.font = (i === hovered ? "600 " : "") + T.fs + "px ui-monospace,monospace";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      var k = s.k.length > 24 ? s.k.slice(0, 23) + "…" : s.k, disp = k + "   " + s.v;
+      ctx.fillText(disp, x + 16, y);
+      if (s.token) hits.push({ x: x - 4, y: y - T.row / 2, w: 20 + ctx.measureText(disp).width, h: T.row - 3, token: s.token, label: s.k });
+    });
+    return hits;
+  }
+  // Type and ring thickness for a disc of radius R. A big disc drawn with the small-chart's 12px
+  // legend and 22px centre number looks like a mistake: the hole reads as empty and the legend as an
+  // afterthought. Ring also thins out as the disc grows (0.6R is chunky once R passes ~140).
+  function donutType(R) {
+    return { fs: R >= 140 ? 13 : 12, row: R >= 140 ? 22 : 19,
+             num: Math.round(Math.min(34, Math.max(22, R * 0.2))), hole: R >= 140 ? 0.66 : 0.6 };
+  }
+  // centerNum/centerLabel: what the hole shows (e.g. 498 / "threats"). Slice ANGLES stay proportional to event
+  // counts (s.v), but the center reflects the card's distinct metric — not the event total (which confused users).
+  function drawDonut(cv, slices, centerNum, centerLabel) {
+    var tc = themeColors();
+    var w = cv._w, h = cv._h, ctx = cctx(cv), cy = h / 2, R = h / 2 - 12, T = donutType(R), r = R * T.hole, a = -Math.PI / 2,
+        P = donutPlacement(ctx, cv, slices, R, T.fs), cx = P.cx,
+        total = slices.reduce(function (s, x) { return s + x.v; }, 0) || 1;
+    slices.forEach(function (s, i) { var ang = s.v / total * Math.PI * 2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a + ang); ctx.closePath(); ctx.fillStyle = s.c || PALETTE[i % PALETTE.length]; ctx.fill(); a += ang; });
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = tc.surface; ctx.fill();
+    var centerVal = centerNum != null ? centerNum : total, centerTxt = centerLabel || "total";
+    ctx.fillStyle = tc.text; ctx.font = "600 " + T.num + "px ui-monospace,monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(fmtN(centerVal), cx, cy - T.num * 0.3);
+    ctx.fillStyle = tc.muted; ctx.font = Math.round(T.num * 0.42) + "px system-ui"; ctx.fillText(centerTxt, cx, cy + T.num * 0.5);
+    return paintDonutLegend(ctx, tc, P, T, cy, slices, -1);   // includes the trailing "other" slice (was cut at 9)
+  }
+  // Interactive donut: same look as drawDonut, but slices pop out + enlarge (with a soft glow) on hover,
+  // a tooltip shows label · count · %, and slices are click-to-filter. Returns the legend hits (unchanged
+  // contract) so showChart's overlay-button code keeps working. Respects prefers-reduced-motion (snaps).
+  function drawInteractiveDonut(cv, slices, centerNum, centerLabel) {
+    var reduce = false; try { reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { }
+    var total = slices.reduce(function (s, x) { return s + x.v; }, 0) || 1;
+    var a = -Math.PI / 2;   // slice ANGLES are fixed; hover only changes each slice's radius/offset (s._t: 0→1 eased)
+    slices.forEach(function (s) { var ang = s.v / total * Math.PI * 2; s._a0 = a; s._a1 = a + ang; s._mid = a + ang / 2; s._t = 0; a = s._a1; });
+    var hovered = -1, legendHits = [], raf = 0, tipEl = null, place = null;
+    // reserve 16px so the hover pop/grow/glow (below) can't spill outside the canvas and get clipped.
+    // `place` is filled by the first paint (it needs a context to measure the legend); hit-testing
+    // only runs after that, and until then the old left-edge position is the honest fallback.
+    function geo() {
+      var h = cv._h, R = h / 2 - 16, T = donutType(R);
+      return { cx: place ? place.cx : h / 2 + 6, cy: h / 2, R: R, r: R * T.hole, T: T };
+    }
+
+    function paint() {
+      var tc = themeColors(), ctx = cctx(cv), R0 = cv._h / 2 - 16, T = donutType(R0);
+      place = donutPlacement(ctx, cv, slices, R0, T.fs);
+      var G = geo();
+      slices.forEach(function (s, i) {
+        var t = s._t, full = (s._a1 - s._a0) >= Math.PI * 2 - 0.001;   // a single (full-circle) slice must NOT pop — it would shift the whole disc off-center and clip
+        var pop = full ? 0 : t * 7, oR = G.R + (full ? t * 2 : t * 5),
+            ox = G.cx + Math.cos(s._mid) * pop, oy = G.cy + Math.sin(s._mid) * pop;
+        ctx.beginPath(); ctx.moveTo(ox, oy); ctx.arc(ox, oy, oR, s._a0, s._a1); ctx.closePath();
+        ctx.fillStyle = s.c || PALETTE[i % PALETTE.length];
+        if (t > 0.01) { ctx.save(); ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12 * t; ctx.fill(); ctx.restore(); } else ctx.fill();
+      });
+      ctx.beginPath(); ctx.arc(G.cx, G.cy, G.r, 0, Math.PI * 2); ctx.fillStyle = tc.surface; ctx.fill();
+      // center ALWAYS shows the card's distinct metric (e.g. "498 threats") — never the hovered slice's event
+      // count, which is what confused people (hover said "47", filtering to that 1 threat then said "1"). The
+      // per-slice event count + share lives in the hover tooltip, clearly labelled, instead.
+      ctx.fillStyle = tc.text; ctx.font = "600 " + T.num + "px ui-monospace,monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(fmtN(centerNum != null ? centerNum : total), G.cx, G.cy - T.num * 0.3);
+      ctx.fillStyle = tc.muted; ctx.font = Math.round(T.num * 0.42) + "px system-ui"; ctx.fillText(centerLabel || "total", G.cx, G.cy + T.num * 0.5);
+      legendHits = paintDonutLegend(ctx, tc, place, T, G.cy, slices, hovered);
+    }
+    function tick() {
+      raf = 0; var moving = false;
+      slices.forEach(function (s, i) {
+        var tgt = i === hovered ? 1 : 0;
+        if (reduce) { s._t = tgt; } else if (Math.abs(tgt - s._t) < 0.01) { s._t = tgt; } else { s._t += (tgt - s._t) * 0.28; moving = true; }
+      });
+      paint();
+      if (moving && document.body.contains(cv)) raf = requestAnimationFrame(tick);
+    }
+    function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+    function sliceAt(mx, my) {
+      var G = geo(), dx = mx - G.cx, dy = my - G.cy, dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < G.r * 0.85 || dist > G.R + 18) return -1;
+      var ang = Math.atan2(dy, dx); while (ang < -Math.PI / 2) ang += Math.PI * 2;
+      for (var i = 0; i < slices.length; i++) if (ang >= slices[i]._a0 && ang < slices[i]._a1) return i;
+      return -1;
+    }
+    function tip(i, mx, my) {
+      var host = cv.parentNode; if (!host) return;
+      if (!tipEl) { tipEl = document.createElement("div"); tipEl.className = "donut-tip"; host.appendChild(tipEl); }
+      var s = slices[i], pct = Math.round(s.v / total * 100);
+      tipEl.innerHTML = "<b>" + esc(s.k) + "</b><span>" + fmtN(s.v) + " event" + (s.v === 1 ? "" : "s") + " · " + pct + "%</span>";
+      tipEl.style.display = "block"; tipEl.style.left = (mx + 14) + "px"; tipEl.style.top = (my + 14) + "px";
+    }
+    cv.onmousemove = function (e) {
+      var p = evXY(cv, e), mx = p[0], my = p[1], i = sliceAt(mx, my);
+      cv.style.cursor = (i >= 0 && slices[i].token) ? "pointer" : "default";
+      if (i >= 0) tip(i, mx, my); else if (tipEl) tipEl.style.display = "none";
+      if (i !== hovered) { hovered = i; kick(); }
+    };
+    cv.onmouseleave = function () { if (tipEl) tipEl.style.display = "none"; if (hovered !== -1) { hovered = -1; cv.style.cursor = "default"; kick(); } };
+    cv.onclick = function () { if (hovered >= 0 && slices[hovered].token) { hideChart(); addFilter(slices[hovered].token); } };
+    paint();   // initial static frame (also populates legendHits)
+    return legendHits;
+  }
+  // Y axis for whole-number counts. Two bugs came out of not having this: the line chart labelled five
+  // gridlines with `Math.round(max * g / 4)`, so a peak of 2 produced "0 1 1 2 2" - two pairs of
+  // identical numbers on different lines (#19570) - and the bar charts drew the gridlines with no
+  // labels at all, leaving a chart you cannot read a value off (#19571).
+  //
+  // Returns the tick values, ascending, from 0. The last one is the top of the scale, so it is also
+  // what the bars/lines are scaled against - a tick above the data is what keeps the tallest bar off
+  // the ceiling. The step is a whole number from the 1/2/5×10^k progression, which is why no two
+  // labels can round to the same text: events are counted, never halved.
+  function axisTicks(max) {
+    max = Math.max(1, Math.ceil(max));
+    var pow = Math.max(1, Math.pow(10, Math.floor(Math.log(max / 4) / Math.LN10))), step = 10 * pow, out = [];
+    [1, 2, 5, 10].some(function (m) { if (Math.ceil(max / (m * pow)) <= 5) { step = m * pow; return true; } return false; });
+    for (var v = 0; v <= max; v += step) out.push(v);
+    if (out[out.length - 1] < max) out.push(out.length * step);
+    return out;
+  }
+  function drawLines(cv, series) {
+    var tc = themeColors();
+    var w = cv._w, h = cv._h, ctx = cctx(cv), pad = 30, gw = w - pad * 2 - 96, gh = h - pad * 2, peak = 1;
+    var lastIdx = 0;   // last hour that actually has data — the line ends here "in the air" (no flat-zero tail)
+    series.forEach(function (s) { s.data.forEach(function (v, i) { if (v > peak) peak = v; if (v > 0) lastIdx = Math.max(lastIdx, i); }); });
+    var ticks = axisTicks(peak), max = ticks[ticks.length - 1];
+    ctx.fillStyle = tc.faint; ctx.font = "10px ui-monospace,monospace"; ctx.textBaseline = "middle";
+    ticks.forEach(function (v) { var yy = pad + gh - gh * v / max; ctx.strokeStyle = tc.line; ctx.beginPath(); ctx.moveTo(pad, yy); ctx.lineTo(pad + gw, yy); ctx.stroke(); ctx.textAlign = "right"; ctx.fillStyle = tc.faint; ctx.fillText(fmtN(v), pad - 6, yy); });
+    var lastX = pad + gw * lastIdx / 23;
+    if (lastIdx < 23) { ctx.strokeStyle = tc.line; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(lastX, pad); ctx.lineTo(lastX, pad + gh); ctx.stroke(); ctx.setLineDash([]); }  // "data ends here" marker
+    series.forEach(function (s, si) {
+      var col = s.c || PALETTE[si % PALETTE.length];
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath();
+      for (var i = 0; i <= lastIdx; i++) { var x = pad + gw * i / 23, y = pad + gh - gh * s.data[i] / max; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+      ctx.stroke();
+      var ey = pad + gh - gh * s.data[lastIdx] / max; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lastX, ey, 2.6, 0, Math.PI * 2); ctx.fill();   // endpoint dot
+    });
+    // hour labels thin out on a narrow chart and fill in on a wide one — every 4h across 2000px reads as stretched
+    var hstep = gw >= 1200 ? 1 : gw >= 700 ? 2 : 4;
+    ctx.fillStyle = tc.faint; ctx.textAlign = "center"; for (var hh = 0; hh < 24; hh += hstep) { var x = pad + gw * hh / 23; ctx.fillText((hh < 10 ? "0" : "") + hh + "h", x, pad + gh + 12); }
+    var lx = pad + gw + 18, ly = pad + 4, hits = []; series.forEach(function (s, i) { ctx.fillStyle = s.c || PALETTE[i % PALETTE.length]; ctx.fillRect(lx, ly - 5, 12, 3); ctx.fillStyle = tc.text; ctx.font = "11px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.fillText(s.name, lx + 18, ly); if (s.token) hits.push({ x: lx - 4, y: ly - 9, w: 24 + ctx.measureText(s.name).width, h: 15, token: s.token, label: s.name }); ly += 18; });
+    return hits;
+  }
+  function drawBars(cv, items) {
+    var tc = themeColors();
+    var w = cv._w, h = cv._h, ctx = cctx(cv), pad = 30, gh = h - pad * 2 - 18, n = items.length || 1, gap = (w - pad * 2) / n, bw = Math.min(gap * 0.6, 72), peak = 1;
+    items.forEach(function (it) { if (it[1] > peak) peak = it[1]; });
+    var ticks = axisTicks(peak), max = ticks[ticks.length - 1];
+    ctx.font = "10px ui-monospace,monospace"; ctx.textBaseline = "middle"; ctx.textAlign = "right";
+    ticks.forEach(function (v) { var yy = pad + gh - gh * v / max; ctx.strokeStyle = tc.line; ctx.beginPath(); ctx.moveTo(pad, yy); ctx.lineTo(w - pad, yy); ctx.stroke(); ctx.fillStyle = tc.faint; ctx.fillText(fmtN(v), pad - 6, yy); });
+    var hits = [];
+    items.forEach(function (it, i) { var bh = gh * it[1] / max, x = pad + gap * i + (gap - bw) / 2, y = pad + gh - bh; ctx.fillStyle = PALETTE[i % PALETTE.length]; ctx.fillRect(x, y, bw, bh); ctx.save(); ctx.translate(x + bw / 2, pad + gh + 6); ctx.rotate(Math.PI / 5); ctx.fillStyle = tc.muted; ctx.font = "9px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.fillText(it[0].length > 18 ? it[0].slice(0, 17) + "…" : it[0], 0, 0); ctx.restore(); hits.push({ x: pad + gap * i, y: pad, w: gap, h: gh + 18, token: "src:" + it[0], label: it[0] }); });
+    return hits;
+  }
+  // mini donut for the Threats/Trails stat cards — same shape as their big chart, scaled to the card corner
+  function miniDonut(cv, slices) {
+    var dpr = window.devicePixelRatio || 1, w = 56, h = 30;
+    cv.width = w * dpr; cv.height = h * dpr; cv.style.width = w + "px"; cv.style.height = h + "px";
+    var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+    var cx = w - 15, cy = h / 2, R = 14, r = 7.5, a = -Math.PI / 2, tc = themeColors();
+    var total = slices.reduce(function (s, x) { return s + x.v; }, 0) || 1;
+    slices.forEach(function (s, i) { var ang = s.v / total * Math.PI * 2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a + ang); ctx.closePath(); ctx.fillStyle = s.c || PALETTE[i % PALETTE.length]; ctx.fill(); a += ang; });
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = tc.surface; ctx.fill();
+  }
+  // horizontal stacked split bar (severity breakdown) — the expanded form of the card's sev-pillrow
+  function drawSplitBar(cv, segs) {
+    var tc = themeColors(), w = cv._w, h = cv._h, ctx = cctx(cv);
+    var pad = 44, bw = w - pad * 2, by = h / 2 - 40, bh = 34, x = pad;
+    var total = segs.reduce(function (s, v) { return s + v.v; }, 0) || 1;
+    ctx.fillStyle = tc.muted; ctx.font = "12px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(total + " threats", pad, by - 12);
+    segs.forEach(function (s) { var sw = bw * s.v / total; if (sw > 0) { ctx.fillStyle = s.c; ctx.fillRect(x, by, sw, bh); } x += sw; });
+    // legend row, evenly spaced
+    var ly = by + bh + 34, slot = bw / segs.length, hits = [];
+    segs.forEach(function (s, i) {
+      var lx = pad + slot * i, pct = Math.round(s.v / total * 100);
+      ctx.fillStyle = s.c; ctx.fillRect(lx, ly - 10, 12, 12);
+      ctx.fillStyle = tc.text; ctx.font = "13px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(s.k, lx + 18, ly - 4);
+      var sub = s.v + " · " + pct + "%"; ctx.fillStyle = tc.muted; ctx.font = "11px ui-monospace,monospace"; ctx.fillText(sub, lx + 18, ly + 10);
+      if (s.token) hits.push({ x: lx - 4, y: ly - 18, w: 24 + Math.max(ctx.measureText(s.k).width, ctx.measureText(sub).width), h: 36, token: s.token, label: s.k });
+    });
+    return hits;
+  }
+  // ---- shared interactive-chart helpers (used by the donut/bars/split hover) ----
+  function prefersReduced() { try { return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } }
+  // Mouse position in the canvas's LOGICAL coordinate space (0.._w × 0.._h). Uses getBoundingClientRect ratios,
+  // not e.offsetX/offsetY — the latter is wrong under the accessibility CSS `zoom`, so the hit-test would light
+  // up the wrong slice/bar at any zoom ≠ 1. The ratio is measured in one consistent space, so zoom cancels out.
+  function evXY(cv, e) { var r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / (r.width || 1) * cv._w, (e.clientY - r.top) / (r.height || 1) * cv._h]; }
+  function chartTip(cv, html, mx, my) {
+    var host = cv.parentNode; if (!host) return;
+    var el = host.querySelector(".donut-tip"); if (!el) { el = document.createElement("div"); el.className = "donut-tip"; host.appendChild(el); }
+    if (html == null) { el.style.display = "none"; return; }
+    el.innerHTML = html; el.style.display = "block"; el.style.left = (mx + 14) + "px"; el.style.top = (my + 14) + "px";
+  }
+  // Sources bars: hovered bar brightens + widens + glows (others dim), tooltip shows count · %, whole column
+  // is click-to-filter. Handles all interaction on the canvas -> returns [] so showChart lays no blocking overlay.
+  function drawInteractiveBars(cv, items) {
+    var reduce = prefersReduced(), hovered = -1, raf = 0, total = items.reduce(function (s, x) { return s + x[1]; }, 0) || 1;
+    items.forEach(function (it) { it._t = 0; });
+    function paint() {
+      var tc = themeColors(), ctx = cctx(cv), w = cv._w, h = cv._h, pad = 30, gh = h - pad * 2 - 18,
+          n = items.length || 1, gap = (w - pad * 2) / n, bw = Math.min(gap * 0.6, 72), peak = 1;   // cap: on a wide panel 14 bars would otherwise be billboards
+      items.forEach(function (it) { if (it[1] > peak) peak = it[1]; });
+      var ticks = axisTicks(peak), max = ticks[ticks.length - 1];
+      ctx.font = "10px ui-monospace,monospace"; ctx.textBaseline = "middle"; ctx.textAlign = "right";
+      ticks.forEach(function (v) { var yy = pad + gh - gh * v / max; ctx.strokeStyle = tc.line; ctx.beginPath(); ctx.moveTo(pad, yy); ctx.lineTo(w - pad, yy); ctx.stroke(); ctx.fillStyle = tc.faint; ctx.fillText(fmtN(v), pad - 6, yy); });
+      items.forEach(function (it, i) {
+        var t = it._t, bh = gh * it[1] / max, gw = bw + t * 6, x = pad + gap * i + (gap - gw) / 2, y = pad + gh - bh, col = PALETTE[i % PALETTE.length];
+        ctx.globalAlpha = (hovered < 0 || i === hovered) ? 1 : 0.4; ctx.fillStyle = col;
+        if (t > 0.01) { ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 16 * t; ctx.fillRect(x, y, gw, bh); ctx.restore(); } else ctx.fillRect(x, y, gw, bh);
+        ctx.globalAlpha = 1;
+        ctx.save(); ctx.translate(x + gw / 2, pad + gh + 6); ctx.rotate(Math.PI / 5); ctx.fillStyle = i === hovered ? tc.text : tc.muted; ctx.font = "9px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.fillText(it[0].length > 18 ? it[0].slice(0, 17) + "…" : it[0], 0, 0); ctx.restore();
+      });
+    }
+    function tick() { raf = 0; var moving = false; items.forEach(function (it, i) { var tgt = i === hovered ? 1 : 0; if (reduce) it._t = tgt; else if (Math.abs(tgt - it._t) < 0.01) it._t = tgt; else { it._t += (tgt - it._t) * 0.3; moving = true; } }); paint(); if (moving && document.body.contains(cv)) raf = requestAnimationFrame(tick); }
+    function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+    function barAt(mx, my) { var w = cv._w, pad = 30, n = items.length || 1, gap = (w - pad * 2) / n; if (mx < pad || mx > w - pad || my < pad) return -1; var i = Math.floor((mx - pad) / gap); return (i >= 0 && i < items.length) ? i : -1; }
+    cv.onmousemove = function (e) {
+      var p = evXY(cv, e), mx = p[0], my = p[1], i = barAt(mx, my); cv.style.cursor = i >= 0 ? "pointer" : "default";
+      if (i >= 0) { var it = items[i]; chartTip(cv, "<b>" + esc(it[0]) + "</b><span>" + fmtN(it[1]) + " event" + (it[1] === 1 ? "" : "s") + " · " + Math.round(it[1] / total * 100) + "%</span>", mx, my); } else chartTip(cv, null);
+      if (i !== hovered) { hovered = i; kick(); }
+    };
+    cv.onmouseleave = function () { chartTip(cv, null); if (hovered !== -1) { hovered = -1; cv.style.cursor = "default"; kick(); } };
+    cv.onclick = function () { if (hovered >= 0) { hideChart(); addFilter("src:" + items[hovered][0]); } };
+    paint(); return [];
+  }
+  // Severity split bar: hovered segment brightens + expands + glows (others dim), tooltip shows count · %,
+  // click-to-filter. The bottom legend stays as overlay hits (keyboard-clickable; it doesn't overlap the bar).
+  function drawInteractiveSplit(cv, segs) {
+    var reduce = prefersReduced(), hovered = -1, raf = 0, hits = [], total = segs.reduce(function (s, x) { return s + x.v; }, 0) || 1;
+    segs.forEach(function (s) { s._t = 0; s._x = 0; s._w = 0; });
+    // caption sits 24px above the bar and the legend 80px below it, so by = h/2 - 28 centres the
+    // whole composition (h/2 - 40 hung it below centre, which showed as a gap under the legend)
+    function geom() { var w = cv._w, h = cv._h, pad = 44; return { w: w, h: h, pad: pad, bw: w - pad * 2, by: h / 2 - 28, bh: 34 }; }
+    function paint() {
+      var tc = themeColors(), ctx = cctx(cv), G = geom();
+      ctx.fillStyle = tc.muted; ctx.font = "12px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(total + " threats", G.pad, G.by - 12);
+      var x = G.pad;
+      segs.forEach(function (s, i) {
+        var sw = G.bw * s.v / total, t = s._t, exp = t * 7;
+        if (sw > 0) { ctx.globalAlpha = (hovered < 0 || i === hovered) ? 1 : 0.4; ctx.fillStyle = s.c;
+          if (t > 0.01) { ctx.save(); ctx.shadowColor = s.c; ctx.shadowBlur = 18 * t; ctx.fillRect(x, G.by - exp, sw, G.bh + exp * 2); ctx.restore(); } else ctx.fillRect(x, G.by, sw, G.bh);
+          ctx.globalAlpha = 1; }
+        s._x = x; s._w = sw; x += sw;
+      });
+      var ly = G.by + G.bh + 34, slot = G.bw / segs.length; hits = [];
+      segs.forEach(function (s, i) {
+        var lx = G.pad + slot * i, pct = Math.round(s.v / total * 100);
+        ctx.fillStyle = s.c; ctx.fillRect(lx, ly - 10, 12, 12);
+        ctx.fillStyle = tc.text; ctx.font = (i === hovered ? "600 " : "") + "13px ui-monospace,monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(s.k, lx + 18, ly - 4);
+        var sub = s.v + " · " + pct + "%"; ctx.fillStyle = tc.muted; ctx.font = "11px ui-monospace,monospace"; ctx.fillText(sub, lx + 18, ly + 10);
+        if (s.token) hits.push({ x: lx - 4, y: ly - 18, w: 24 + Math.max(ctx.measureText(s.k).width, ctx.measureText(sub).width), h: 36, token: s.token, label: s.k });
+      });
+    }
+    function tick() { raf = 0; var moving = false; segs.forEach(function (s, i) { var tgt = i === hovered ? 1 : 0; if (reduce) s._t = tgt; else if (Math.abs(tgt - s._t) < 0.01) s._t = tgt; else { s._t += (tgt - s._t) * 0.3; moving = true; } }); paint(); if (moving && document.body.contains(cv)) raf = requestAnimationFrame(tick); }
+    function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+    function segAt(mx, my) { var G = geom(); if (my < G.by - 12 || my > G.by + G.bh + 12) return -1; for (var i = 0; i < segs.length; i++) if (segs[i]._w > 0 && mx >= segs[i]._x && mx < segs[i]._x + segs[i]._w) return i; return -1; }
+    cv.onmousemove = function (e) {
+      var p = evXY(cv, e), mx = p[0], my = p[1], i = segAt(mx, my); cv.style.cursor = (i >= 0 && segs[i].token) ? "pointer" : "default";
+      if (i >= 0) { var s = segs[i]; chartTip(cv, "<b>" + esc(s.k) + "</b><span>" + fmtN(s.v) + " threat" + (s.v === 1 ? "" : "s") + " · " + Math.round(s.v / total * 100) + "%</span>", mx, my); } else chartTip(cv, null);
+      if (i !== hovered) { hovered = i; kick(); }
+    };
+    cv.onmouseleave = function () { chartTip(cv, null); if (hovered !== -1) { hovered = -1; cv.style.cursor = "default"; kick(); } };
+    cv.onclick = function () { if (hovered >= 0 && segs[hovered].token) { hideChart(); addFilter(segs[hovered].token); } };
+    paint(); return hits;
+  }
+  function showChart(type) {
+    var area = document.getElementById("chart_area"), d = state.viewAgg || state.agg; if (!area || !d) return;   // follow the filtered set
+    if (state.chart === type) { hideChart(); return; }
+    state.chart = type; state._openChart = type; syncHash();   // keep the URL's chart= in sync (bookmarkable)
+    document.querySelectorAll(".card").forEach(function (c) { c.classList.toggle("active", c.dataset.chart === type); });
+    area.innerHTML = '<div class="chart-panel"><div class="chart-head"><span>' + esc(type) + ' breakdown</span><span class="chart-x">✕</span></div><div class="chart-cv"><canvas id="bigchart"></canvas></div></div>';   // esc(): `type` can come from the attacker-controlled #chart= URL fragment (parseHash) -> DOM XSS if raw
+    area.querySelector(".chart-x").onclick = hideChart;
+    // Fill the panel. `main` is full-width (no centered 1500px column any more), so the old hard
+    // 980px cap left the chart marooned in the left third of a wide screen with dead space beside
+    // it. Height follows width so a 2560px monitor doesn't get a letterbox strip.
+    var cv = document.getElementById("bigchart");
+    cv._w = Math.max(320, (area.clientWidth || 940) - 34);
+    // Height per chart shape, because they want different things from it:
+    //   Severity  one horizontal bar + three labels; a tall canvas is just empty space
+    //   donuts    the disc is sized off the HEIGHT, so this is what makes the pie big enough to read
+    //   lines/bars a plot area, which reads badly if it gets too square
+    cv._h = type === "Severity" ? 190
+          : (type === "Threats" || type === "Trails") ? Math.round(Math.max(320, Math.min(400, cv._w * 0.26)))
+          : Math.round(Math.max(250, Math.min(340, cv._w * 0.22)));
+    var hits = [];
+    if (type === "Severity") hits = drawInteractiveSplit(cv, [{ k: "high", v: d.sevCount[3], c: "#F43F5E", token: "sev:high" }, { k: "medium", v: d.sevCount[2], c: "#F59E0B", token: "sev:medium" }, { k: "low", v: d.sevCount[1], c: "#64748B", token: "sev:low" }]);
+    else if (type === "Trails") { var tn = topN(d.trailCounts, 9, d.events), sl = tn.items.map(function (x) { return { k: x[0], v: x[1], token: "trail:" + x[0] }; }); if (tn.other) sl.push({ k: "other", v: tn.other, c: otherColor() }); hits = drawInteractiveDonut(cv, sl, d.trailsN, "trails"); }
+    else if (type === "Threats") { var ts = (d.threats || state.all).slice().sort(function (a, b) { return b.count - a.count; }), sl = ts.slice(0, 9).map(function (t) { return { k: t.uidc, v: t.count, c: uidColor(t.uidc), token: "uid:" + t.uidc }; }); var oth = ts.slice(9).reduce(function (s, t) { return s + t.count; }, 0); if (oth) sl.push({ k: "other", v: oth, c: otherColor() }); hits = drawInteractiveDonut(cv, sl, d.threats.length, "threats"); }   // include "other" so the big donut matches the mini (like Trails)
+    else if (type === "Sources") hits = drawInteractiveBars(cv, topN(d.srcCounts, 14, d.events).items);
+    else { var types = Object.keys(d.typeHours).sort(function (a, b) { return d.typeCounts[b] - d.typeCounts[a]; }).slice(0, 5); hits = drawLines(cv, types.map(function (t, i) { return { name: t, data: d.typeHours[t], c: TYPE_COLORS[t] || PALETTE[i], token: "type:" + t }; })); }
+    // overlay transparent clickable buttons on the painted legend (canvas text isn't clickable) -> apply that filter
+    var ov = area.querySelector(".chart-cv");
+    hits.forEach(function (hit) {
+      var bt = document.createElement("button"); bt.className = "chart-hit"; bt.title = "filter: " + hit.token;
+      bt.style.left = hit.x + "px"; bt.style.top = hit.y + "px"; bt.style.width = hit.w + "px"; bt.style.height = hit.h + "px";
+      bt.setAttribute("aria-label", "filter by " + hit.label);
+      bt.onclick = function () { hideChart(); addFilter(hit.token); };
+      ov.appendChild(bt);
+    });
+  }
+  function hideChart() { state.chart = null; state._openChart = ""; var a = document.getElementById("chart_area"); if (a) a.innerHTML = ""; document.querySelectorAll(".card").forEach(function (c) { c.classList.remove("active"); }); syncHash(); }
+  // The canvas is sized once, in pixels, when the chart opens - so without this a window resize (or a
+  // sidebar/zoom change) left it at the old width: too small for the panel, or overflowing it.
+  var _chartResizeT = null;
+  window.addEventListener("resize", function () {
+    if (!state.chart) return;
+    if (_chartResizeT) clearTimeout(_chartResizeT);
+    _chartResizeT = setTimeout(function () {
+      _chartResizeT = null;
+      var open = state.chart; if (!open) return;
+      state.chart = null; showChart(open);   // showChart toggles when asked for the open one, so clear it first
+    }, 120);
+  });
+
+  // ---- interactive view state ----
+  // ---- local persistence (hidden threats, UID-keyed; UID is byte-compatible with the legacy frontend) ----
+  var LS_HIDDEN = "mt_hidden_v2";
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  // Bumped by every persisted preference change, which is what invalidates the cached grid view
+  // below. Hooking it HERE rather than at each individual saver is deliberate: hidden threats,
+  // whitelist, tags and triage all filter the grid, and a preference added later would otherwise
+  // have to remember to invalidate or leave the grid showing rows it no longer matches. An extra
+  // invalidation costs one recompute; a missed one shows the analyst the wrong threats.
+  var _viewVer = 0;
+  // The two keys that are written often and can never change WHICH rows are shown: the RIPE
+  // geo/ASN cache (saved every time an enrichment lookup returns) and the page-size preference.
+  // Everything else that goes through here - hidden, whitelist, tags, triage, notes, aliases - is
+  // a filter input, so the default stays "invalidate", and a preference added later gets correct
+  // behaviour without anyone having to remember to wire it up.
+  var LS_NOT_A_FILTER = { "mt_ripe": 1, "mt_prefs": 1, "mt_live": 1 };
+  function lsSet(k, v) { if (!LS_NOT_A_FILTER[k]) _viewVer++; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+  function loadHidden() { var o = lsGet(LS_HIDDEN, {}); return (o && typeof o === "object") ? o : {}; }
+  function saveHidden() { lsSet(LS_HIDDEN, state.hidden); }
+  function toggleHide(uid) { if (!uid) return; if (state.hidden[uid]) delete state.hidden[uid]; else state.hidden[uid] = 1; saveHidden(); refresh(); }
+  function unhideAll() { state.hidden = {}; saveHidden(); refresh(); }
+
+  // ===== Triage: whitelist rules + right-click context menu + OSINT lookups =====
+  var LS_WL = "mt_whitelist_v2";
+  function loadWL() { var o = lsGet(LS_WL, null); o = (o && typeof o === "object") ? o : {}; o.src = o.src || {}; o.trail = o.trail || {}; return o; }
+  function saveWL() { lsSet(LS_WL, state.wl); }
+  function wlCount() { return Object.keys(state.wl.src).length + Object.keys(state.wl.trail).length; }
+  // Whether ANY whitelist rule exists, memoized against the same counter that invalidates the grid
+  // view (saveWL goes through lsSet). Most deployments have none, and isWL runs once per threat per
+  // filter pass - so without this the empty case still paid a normTrail call and an Array.from
+  // allocation for every one of ~120k threats, to answer "no" every time.
+  var _wlAny = false, _wlAnyVer = -1;
+  function wlAny() {
+    if (_wlAnyVer !== _viewVer) {
+      _wlAnyVer = _viewVer;
+      var w = state.wl;
+      _wlAny = !!(w && (Object.keys(w.src).length || Object.keys(w.trail).length));
+    }
+    return _wlAny;
+  }
+  function isWL(t) {
+    if (!wlAny()) return false;
+    var w = state.wl;
+    if (w.src[t.src]) return true;
+    if (w.trail[normTrail(t.trail)]) return true;
+    // iterate the Set directly rather than materialising it - setList() is an Array.from, and this
+    // runs per threat
+    var vals = t.srcS && t.srcS.vals;
+    if (vals) { var it = vals.values(), r; while (!(r = it.next()).done) if (w.src[r.value]) return true; }
+    return false;
+  }
+  function whitelistSrc(ip) { if (ip) { state.wl.src[ip] = 1; saveWL(); state.page = 0; refresh(); } }
+  function whitelistTrail(tr) { tr = normTrail(tr); if (tr) { state.wl.trail[tr] = 1; saveWL(); state.page = 0; refresh(); } }
+  function unWL(kind, val) { if (state.wl[kind]) delete state.wl[kind][val]; saveWL(); refresh(); }
+  function clearWL() { state.wl = { src: {}, trail: {} }; saveWL(); refresh(); }
+  function openLookup(kind, val) {
+    if (!val) return;
+    var u = kind === "vt-ip" ? "https://www.virustotal.com/gui/ip-address/" + encodeURIComponent(val)
+      : kind === "abuse" ? "https://www.abuseipdb.com/check/" + encodeURIComponent(val)
+      : kind === "shodan" ? "https://www.shodan.io/host/" + encodeURIComponent(val)
+      : kind === "vt-dom" ? "https://www.virustotal.com/gui/domain/" + encodeURIComponent(val)
+      : kind === "urlscan" ? "https://urlscan.io/search/#" + encodeURIComponent(val) : null;
+    if (u) window.open(u, "_blank", "noopener");
+  }
+  // The external/malicious IP to hand to VT/AbuseIPDB/Shodan — NOT the local source (looking up a LAN address is
+  // pointless). Mirrors the server's event_country direction logic: 1) an IP carried by the trail itself (bare IP
+  // or an IP-based URL) IS the IOC; 2) else a public destination (outbound C2/download); 3) else a public source
+  // (inbound attacker). null when the threat has no public IP at all (internal-only) -> callers hide the buttons.
+  function threatExtIP(t) {
+    if (!t) return null;
+    var m = /^(\d{1,3}(?:\.\d{1,3}){3})(?:[:/]|$)/.exec(normTrail(t.trail) || "");
+    if (m && isPubIP(m[1])) return m[1];
+    var i, d = t.dstS ? setList(t.dstS) : [], s = t.srcS ? setList(t.srcS) : [];
+    for (i = 0; i < d.length; i++) if (isPubIP(d[i])) return d[i];
+    for (i = 0; i < s.length; i++) if (isPubIP(s[i])) return s[i];
+    return null;
+  }
+  // MITRE ATT&CK - CONSERVATIVE, NETWORK-OBSERVABLE mapping only, matched against a threat's `info`. A threat with
+  // no clear behavioural signal gets NO tag: we never fabricate host-side techniques (cred access, priv-esc,
+  // persistence, execution) from a network IOC hit - that's the lazy mapping a senior analyst rightly dismisses.
+  var ATTACK_MAP = [
+    [/\bscan(ning|ner)?\b|mass.?scanner/, "T1595", "Active Scanning", "Reconnaissance"],
+    [/sinkhol|seiz(ed|ure)|cobalt|\bc2\b|_c2\b|c2_|beacon|\bsliver\b|\bhavoc\b|\bmythic\b|meterpreter|metasploit|\bempire\b|poshc2|covenant|brute.?ratel/, "T1071", "Application Layer Protocol", "Command & Control"],
+    [/dns.?tunnel/, "T1071.004", "Application Layer Protocol: DNS", "Command & Control"],
+    [/\bdga\b|dns exhaustion|no such domain/, "T1568.002", "Domain Generation Algorithms", "Command & Control"],
+    [/dynamic.?domain|dynamic.?dns|fast.?flux|blockchain.?dns/, "T1568", "Dynamic Resolution", "Command & Control"],
+    [/\b(tor|onion|i2p)\b/, "T1090.003", "Multi-hop Proxy", "Command & Control"],
+    [/proxy/, "T1090", "Proxy", "Command & Control"],
+    [/ingress|download/, "T1105", "Ingress Tool Transfer", "Command & Control"],
+    [/meshagent|simplehelp|connectwise|nezha|wiseremote|anydesk|teamviewer|screenconnect|rustdesk|\batera\b|splashtop|kaseya|remote.?utilities/, "T1219", "Remote Access Software", "Command & Control"],
+    [/ransomware|ransom\b/, "T1486", "Data Encrypted for Impact", "Impact"],
+    [/crypto.?min|coin.?min|\bminer\b|cryptojack/, "T1496", "Resource Hijacking", "Impact"],
+    [/\bddos\b|denial of service/, "T1498", "Network Denial of Service", "Impact"],
+    [/phish/, "T1566", "Phishing", "Initial Access"],
+    [/web.?shell/, "T1505.003", "Web Shell", "Persistence"],
+    [/brute.?force|bruteforce/, "T1110", "Brute Force", "Credential Access"]
+  ];
+  var _atkCache = Object.create(null), _atkCacheN = 0;
+  function attackTechniques(info) {   // -> [{id,name,tactic}], deduped; memoized (info repeats heavily)
+    if (!info) return [];
+    var hit = _atkCache[info]; if (hit) return hit;
+    if (_atkCacheN > 100000) { _atkCache = Object.create(null); _atkCacheN = 0; }
+    var s = ("" + info).toLowerCase(), out = [], seen = {};
+    for (var i = 0; i < ATTACK_MAP.length; i++) {
+      var e = ATTACK_MAP[i];
+      if (!seen[e[1]] && e[0].test(s)) { seen[e[1]] = 1; out.push({ id: e[1], name: e[2], tactic: e[3] }); }
+    }
+    _atkCache[info] = out; _atkCacheN++; return out;
+  }
+  function attackChipsHTML(info) {   // drawer chips linking to the technique page on attack.mitre.org (on-demand)
+    var a = attackTechniques(info); if (!a.length) return "";
+    return '<div class="dwr-attack" title="MITRE ATT&CK techniques inferred from this detection">' + a.map(function (x) {
+      return '<a class="atk-chip" href="https://attack.mitre.org/techniques/' + x.id.replace(".", "/") + '/" target="_blank" rel="noopener noreferrer" title="' + esc(x.tactic) + '">' + tacticIcon(x.tactic) + esc(x.id) + " · " + esc(x.name) + "</a>";
+    }).join("") + "</div>";
+  }
+  // ===== Export: current filtered view -> CSV / JSON / defanged IOCs (client-side download) =====
+  function csvCell(v) { v = "" + (v == null ? "" : v); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; /* neutralize spreadsheet formula injection (=cmd…, @SUM…) from attacker-controlled trail/info/tag fields opened in Excel/Sheets */ return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function buildCSV() {
+    var rows = viewList();
+    var out = ["severity,uid,events,first_seen,last_seen,sensors,sources,destinations,ports,protocols,type,trail,info,reference,tags"];
+    rows.forEach(function (t) {
+      out.push([sevName(t.sev), t.uidc, t.count, t.first, t.last, setList(t.sensorS).join("|"), setList(t.srcS).join("|"), setList(t.dstS).join("|"),
+        setList(t.dportS).join("|"), setList(t.protoS).join("|"), t.type, t.trail, t.info, t.ref, (state.tags[t.uidc] || "")].map(csvCell).join(","));
+    });
+    return out.join("\n");
+  }
+  function buildJSON() {
+    return JSON.stringify(viewList().map(function (t) {
+      return { severity: sevName(t.sev), uid: t.uidc, events: t.count, first_seen: t.first, last_seen: t.last,
+        sensors: setList(t.sensorS), sources: setList(t.srcS), destinations: setList(t.dstS), ports: setList(t.dportS), protocols: setList(t.protoS),
+        type: t.type, trail: t.trail, info: t.info, reference: t.ref, tags: tagsOf(t.uidc) };
+    }), null, 2);
+  }
+  function defang(s) { return ("" + s).replace(/http/gi, "hxxp").replace(/:\/\//g, "[://]").replace(/\./g, "[.]"); }
+  function buildIOC() {
+    var rows = viewList(), set = {};
+    rows.forEach(function (t) {
+      // IOC = the real domain/IP. Decode escaped parens, drop a TRAILING " (annotation)" (reverse-DNS / UA detail),
+      // then strip the remaining (embedded) paren chars so a heuristic "(sld).tld" yields "sld.tld" — the old
+      // remove-parens-AND-content turned "(btmaq).com" into the useless bare suffix "com".
+      var bare = charTrim(charTrim(("" + t.trail).replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\s*\([^()]*\)\s*$/, "").replace(/[()]/g, ""), " "), ".");
+      if (bare) set[bare] = 1;
+      setList(t.dstS).forEach(function (ip) { if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) set[ip] = 1; });
+    });
+    var list = Object.keys(set).sort();
+    return "# Maltrail IOC export · " + list.length + " indicators (defanged) · " + (currentDate() || todayStr()) +
+      "\n" + list.map(defang).join("\n");
+  }
+  function download(name, text, mime) {
+    try {
+      var blob = new Blob([text], { type: mime || "text/plain" }), url = URL.createObjectURL(blob);
+      var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    } catch (e) { }
+  }
+  function exportAs(kind) {
+    var date = currentDate() || todayStr();
+    if (kind === "csv") download("maltrail-threats-" + date + ".csv", buildCSV(), "text/csv");
+    else if (kind === "json") download("maltrail-threats-" + date + ".json", buildJSON(), "application/json");
+    else if (kind === "ioc") download("maltrail-iocs-" + date + ".txt", buildIOC(), "text/plain");
+  }
+  // ===== Saved views / filter presets (localStorage) =====
+  function loadViews() { var a = lsGet("mt_views", null); return Array.isArray(a) ? a : []; }
+  function saveViews() { lsSet("mt_views", savedViews); }
+  var savedViews = loadViews();
+  function applySavedView(v) {
+    state.filters = (v.filters || []).slice(); state.sev = (v.sev == null ? null : v.sev);
+    state.sortKey = v.sortKey || "first"; state.sortDir = v.sortDir || -1; state.input = v.input || "";
+    state.page = 0; var f = document.getElementById("filter"); if (f) f.value = state.input; refresh();
+  }
+  function deleteView(i) { savedViews.splice(i, 1); saveViews(); }
+  function openSaveView() {
+    closeCtx();
+    if (document.getElementById("sv_overlay")) return;
+    var o = document.createElement("div"); o.id = "sv_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal"><div class="modal-h">Save current view</div>' +
+      '<label for="sv_name">View name</label><input id="sv_name" autocomplete="off" placeholder="e.g. High malware \u00b7 external">' +
+      '<div class="modal-actions"><button class="btn-ghost" id="sv_cancel">Cancel</button><button class="btn-primary" id="sv_save">Save</button></div></div>';
+    document.body.appendChild(o);
+    var inp = o.querySelector("#sv_name"); inp.focus();
+    o.onclick = function (e) { if (e.target === o) o.remove(); };
+    o.querySelector("#sv_cancel").onclick = function () { o.remove(); };
+    function save() {
+      var n = inp.value.trim(); if (!n) { inp.focus(); return; }
+      savedViews.push({ name: n.slice(0, 40), filters: state.filters.slice(), sev: state.sev, sortKey: state.sortKey, sortDir: state.sortDir, input: state.input.trim() });
+      saveViews(); o.remove();
+    }
+    o.querySelector("#sv_save").onclick = save;
+    inp.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); save(); } else if (e.key === "Escape") { o.remove(); } };
+  }
+  // set / edit / clear a user alias for an IP (shown beside that IP everywhere it appears)
+  function openAlias(ip) {
+    closeCtx();
+    if (document.getElementById("al_overlay")) return;
+    var cur = (state.aliases && state.aliases[ip]) || "";
+    var o = document.createElement("div"); o.id = "al_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal"><div class="modal-h">Alias for ' + esc(ip) + '</div>' +
+      '<label for="al_name">Label (empty to clear)</label><input id="al_name" autocomplete="off" maxlength="40" placeholder="e.g. corp-proxy">' +
+      '<div class="modal-actions"><button class="btn-ghost" id="al_cancel">Cancel</button><button class="btn-primary" id="al_save">Save</button></div></div>';
+    document.body.appendChild(o);
+    var inp = o.querySelector("#al_name"); inp.value = cur; inp.focus(); inp.select();
+    function close() { o.remove(); }
+    o.onclick = function (e) { if (e.target === o) close(); };
+    o.querySelector("#al_cancel").onclick = close;
+    function save() { setAlias(ip, inp.value); close(); }   // empty -> clears
+    o.querySelector("#al_save").onclick = save;
+    inp.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); close(); } };
+  }
+  function openViewsMenu(btn) {
+    var m = document.getElementById("ctxmenu"); if (!m) return; m.innerHTML = "";
+    var sv = document.createElement("button"); sv.type = "button"; sv.className = "ctxitem"; sv.textContent = "\uFF0B Save current view\u2026";
+    sv.onclick = function (e) { e.stopPropagation(); openSaveView(); }; m.appendChild(sv);
+    var sep = document.createElement("div"); sep.className = "ctxsep"; m.appendChild(sep);
+    if (!savedViews.length) { var note = document.createElement("div"); note.className = "ctxnote"; note.textContent = "No saved views yet"; m.appendChild(note); }
+    else savedViews.forEach(function (v, i) {
+      var row = document.createElement("div"); row.className = "ctxview";
+      var ap = document.createElement("button"); ap.type = "button"; ap.className = "ctxitem viewapply"; ap.textContent = "\u25B8 " + v.name;
+      ap.onclick = function (e) { e.stopPropagation(); closeCtx(); applySavedView(v); };
+      var del = document.createElement("button"); del.type = "button"; del.className = "viewdel"; del.title = "delete view"; del.textContent = "\u2715";
+      del.onclick = function (e) { e.stopPropagation(); deleteView(i); openViewsMenu(btn); };
+      row.appendChild(ap); row.appendChild(del); m.appendChild(row);
+    });
+    m.style.display = "block"; m.setAttribute("aria-hidden", "false");
+    _placeBelow(m, btn, 4);
+  }
+  // ===== Live mode: auto-refresh + new-threat detection + opt-in alerts =====
+  var LIVE_MS = 5000;   // poll fallback cadence (only when SSE push is unavailable; merge is cheap so this is fine)
+  // Explicit end meaning "to EOF", clamped server-side to total-1 — a guaranteed newline boundary
+  // on an append-only log. The server has accepted open-ended "bytes=N-" since 888a87ec, so this
+  // is no longer a workaround; it is kept because an explicit end is also what pins the response
+  // to the length the aggregate was baselined against, and it works against older servers.
+  var LIVE_MAX_END = 2147483647;
+  function alertNew(list) {
+    if (!getMuted()) {   // user can mute the new-threat beep (the desktop notification, if granted, still shows)
+      try { var C = window.AudioContext || window.webkitAudioContext; if (C) { var ac = state._ac || (state._ac = new C()); if (ac.state === "suspended") ac.resume(); var o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.value = 880; g.gain.value = 0.05; o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.13); } } catch (e) { }
+    }
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification("Maltrail \u00b7 " + list.length + " new high-severity", { body: list.slice(0, 3).map(function (t) { return t.src + " \u2192 " + t.trail; }).join("\n") }); } catch (e) { }
+  }
+  function clearNew() { state.newCount = 0; state.newUids = {}; refresh(); }
+  // "New" means "appeared on the day being viewed since it was first loaded". The seen-set used to
+  // live for the whole session, so stepping to yesterday reported all of yesterday as new
+  // ("44717 new" after one click, accumulating with every further day) - a number nobody could
+  // act on, in the place that is supposed to say what arrived while you were looking.
+  function markNew(threats, date) {
+    if (state._knownDate !== date) { state.knownUids = {}; state.newUids = {}; state.newCount = 0; state._seenInit = false; state._knownDate = date; }
+    var newOnes = [], i;
+    if (state._seenInit) { for (i = 0; i < threats.length; i++) if (!state.knownUids[threats[i].uidc]) newOnes.push(threats[i]); }
+    for (i = 0; i < threats.length; i++) state.knownUids[threats[i].uidc] = 1;
+    state._seenInit = true;
+    state.newUids = {}; for (i = 0; i < newOnes.length; i++) state.newUids[newOnes[i].uidc] = 1;
+    state.newCount += newOnes.length;
+    return newOnes;
+  }
+  function renderNewPill() {
+    var el = document.getElementById("newpill"); if (!el) return;
+    if (state.newCount > 0) { el.style.display = ""; el.textContent = state.newCount + " new"; el.onclick = clearNew; }
+    else { el.style.display = "none"; }
+  }
+  function stopLive() {
+    if (state._liveTimer) { clearInterval(state._liveTimer); state._liveTimer = null; }
+    if (state._es) { try { state._es.close(); } catch (e) {} state._es = null; }
+    if (state._liveFlush) { clearTimeout(state._liveFlush); state._liveFlush = null; }
+    state._liveBuf = []; state._liveBufDate = null;   // discard any buffered lines so they can't merge into another day
+  }
+  function startPoll() {   // fallback when SSE is unavailable/broken
+    if (state._liveTimer) return;
+    // A range is a STATIC view: the server's concatenated reader snapshots each file's size when
+    // it opens, so a range can never grow under the tail. Only the newest day is still being
+    // appended to, and following it while showing seven would put new rows under a heading that
+    // does not cover them.
+    state._liveTimer = setInterval(function () { var d = currentDate(); if (state.live && !isRange(d)) liveTick(d); }, LIVE_MS);
+  }
+  // batch lines pushed over SSE and merge them in one render (handles bursts without re-rendering per line)
+  // `date` = the day this stream is for; ignore anything that isn't the currently-viewed day (e.g. a late
+  // message from the previous day's stream after you navigate) so events never bleed into the wrong date.
+  function onLiveLine(line, id, date) {
+    if (date !== currentDate()) return;
+    if (state._liveBuf.length && state._liveBufDate !== date) state._liveBuf = [];   // day changed mid-batch
+    state._liveBufDate = date;
+    if (line) state._liveBuf.push(line);
+    if (id) { var n = parseInt(id, 10); if (!isNaN(n)) state._liveBytes = n; }
+    if (!state._liveFlush) state._liveFlush = setTimeout(flushLive, 100);
+  }
+  function flushLive() {
+    state._liveFlush = null;
+    var buf = state._liveBuf; state._liveBuf = [];
+    if (!buf.length || state._liveBufDate !== currentDate()) return;   // navigated away before flush -> drop
+    if (mergeable()) mergeText(buf.join("\n"), false, state._loadSeq);
+    else loadEvents(currentDate());   // no baseline yet -> full load
+  }
+  function openSSE(date) {
+    if (typeof EventSource === "undefined") { startPoll(); return; }
+    var url = "/live?date=" + encodeURIComponent(date) + (state._liveBytes != null && state._liveDate === date ? "&pos=" + state._liveBytes : "");
+    var es;
+    try { es = new EventSource(url); } catch (e) { startPoll(); return; }
+    state._es = es; state._liveDate = date;
+    es.onopen = function () { state._sseOk = true; if (state._liveTimer) { clearInterval(state._liveTimer); state._liveTimer = null; } };   // SSE up -> drop the poll fallback
+    es.onmessage = function (e) { onLiveLine(e.data, e.lastEventId, date); };   // tag with this stream's day
+    es.onerror = function () {
+      // CLOSED (2): server rejected (no /live, 204 restricted, error) -> permanent fallback to polling.
+      // CONNECTING (0): transient drop, EventSource auto-reconnects with Last-Event-ID; just ensure a poll safety net.
+      if (es.readyState === 2) { state._es = null; if (state.live) { liveTick(currentDate()); startPoll(); } }
+      else if (state.live && !state._sseOk) startPoll();
+    };
+  }
+  function setLive(on) {
+    state.live = on;
+    var btn = document.getElementById("live_btn"); if (btn) { btn.classList.toggle("on", on); btn.setAttribute("aria-pressed", on ? "true" : "false"); }
+    stopLive();
+    if (on && !DEMO && isRange(currentDate())) {
+      // A multi-day selection is a static view (see startPoll). Opening a stream for it would
+      // hold one of the server's limited /live slots to deliver lines this view then discards.
+      setStatus("live updates apply to a single day — pick one day to follow new events");
+      return;
+    }
+    if (on && !DEMO) {
+      state._sseOk = false;
+      if (typeof EventSource !== "undefined") openSSE(currentDate());   // SSE streams everything since the last load (instant); no separate catch-up poll -> no double-delivery
+      else { liveTick(currentDate()); startPoll(); }                    // no EventSource: catch up now, then poll
+    }
+  }
+  function openQueryHelp(btn) {
+    var m = document.getElementById("ctxmenu"); if (!m) return; m.innerHTML = "";
+    var h = document.createElement("div"); h.className = "ctxnote qhelp-h"; h.textContent = "Search syntax \u00b7 space = AND \u00b7 click to try"; m.appendChild(h);
+    [["sev:high", "high severity"], ["type:dns,http", "type (OR-list)"], ["port:443,8080", "port list"], ["port:1000-2000", "port range"], ["port:>1024", "port compare"],
+     ["count:>=100", "noisy threats"], ["src:10.0.0.0/8", "source subnet (CIDR)"], ["dst:8.8.8.8", "destination"], ["dir:out", "flagged reply (→ out)"], ["dir:in", "flagged request (← in)"], ["trail:*.ru", "trail wildcard"], ["sensor:r2d2", "by sensor"], ["class:malware", "threat class"], ["family:interlock", "campaign, all shards"], ["tag:apt", "your tag"],
+     ["type:dns sev:high", "both (AND)"], ["sev:high,med OR type:http", "OR / lists"], ["NOT type:dns", "negate (or -)"], ["(sev:high OR sev:med) type:http", "group ( )"], ['info:"cobalt strike"', "quoted phrase"]].forEach(function (e) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "ctxitem qhelp-i";
+      b.innerHTML = '<span class="qk">' + e[0] + '</span><span class="qd">' + e[1] + '</span>';
+      b.onclick = function (ev) { ev.stopPropagation(); closeCtx(); var f = document.getElementById("filter"); if (f) { f.value = e[0]; state.input = e[0]; state.page = 0; refresh(); f.focus(); } };
+      m.appendChild(b);
+    });
+    m.style.display = "block"; m.setAttribute("aria-hidden", "false");
+    _placeBelow(m, btn, 5);
+  }
+  // far-left hamburger menu: the project links (docs/issues/github) that used to clutter the top bar. Inline SVGs
+  // (no external assets — air-gap safe) matching the icons they replaced.
+  function _strokeIcon(p) { return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>'; }
+  var NAV_LINKS = [
+    ["https://github.com/stamparm/maltrail#readme", _strokeIcon('<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>'), "Documentation"],
+    ["https://github.com/stamparm/maltrail/issues", _strokeIcon('<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 4.24 4.24"/><path d="m14.86 14.86 4.24 4.24"/><path d="m14.86 9.14 4.24-4.24"/><path d="m4.9 19.1 4.24-4.24"/><circle cx="12" cy="12" r="4"/>'), "Report an issue"],
+    ["https://github.com/stamparm/maltrail", '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.8-1.3-1.8-1-.7.1-.7.1-.7 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.3-3.2-.2-.3-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.9.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/></svg>', "Source on GitHub"]
+  ];
+  function openNavMenu(btn) {
+    var m = document.getElementById("ctxmenu"); if (!m) return; m.innerHTML = "";
+    var sb = document.createElement("button"); sb.type = "button"; sb.className = "ctxitem navitem";
+    sb.innerHTML = _strokeIcon('<rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 12h.01"/><path d="M10 12h8"/>') + '<span class="navlabel">Sensors</span>' + (_staleSensors ? '<span class="sens-badge">' + _staleSensors + ' silent</span>' : "");
+    sb.onclick = function (e) { e.stopPropagation(); closeCtx(); openSensors(); };
+    m.appendChild(sb);
+    NAV_LINKS.forEach(function (e) {
+      var a = document.createElement("a"); a.className = "ctxitem navitem";
+      a.href = e[0]; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.innerHTML = e[1] + '<span class="navlabel">' + e[2] + '</span>';
+      m.appendChild(a);
+    });
+    m.style.display = "block"; m.setAttribute("aria-hidden", "false"); btn.setAttribute("aria-expanded", "true");
+    _placeBelow(m, btn, 5);
+  }
+
+
+
+  function openExportMenu(btn) {
+    var m = document.getElementById("ctxmenu"); if (!m) return;
+    var n = viewList().length;
+    m.innerHTML = "";
+    [["Export CSV · " + n + " threats", "csv"], ["Export JSON", "json"], ["Export defanged IOCs", "ioc"]].forEach(function (it) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "ctxitem"; b.textContent = it[0];
+      b.onclick = function (e) { e.stopPropagation(); closeCtx(); exportAs(it[1]); }; m.appendChild(b);
+    });
+    m.style.display = "block"; m.setAttribute("aria-hidden", "false");
+    _placeBelow(m, btn, 4);
+  }
+
+  function closeCtx() { var m = document.getElementById("ctxmenu"); if (m) { m.style.display = "none"; m.setAttribute("aria-hidden", "true"); m.innerHTML = ""; } var hb = document.getElementById("nav_menu"); if (hb) hb.setAttribute("aria-expanded", "false"); }
+  function closeDrawer() {
+    var d = document.getElementById("drawer"), sc = document.getElementById("drawer_scrim");
+    var wasOpen = d && d.classList.contains("open");
+    if (d) d.classList.remove("open"); if (sc) sc.classList.remove("open");
+    if (wasOpen && state._drawerReturn && state._drawerReturn.focus) { try { state._drawerReturn.focus(); } catch (e) {} }   // restore focus to the trigger
+    // A row click leaves <body> as the focus origin and body.focus() is a no-op, so the restore
+    // above silently did nothing and focus stayed on the close button of a panel that is now
+    // translated off-screen - the next Tab walked into a drawer the user cannot see. Blur when the
+    // restore did not take, and make the closed panel untabbable regardless.
+    if (wasOpen && d && d.contains(document.activeElement)) { try { document.activeElement.blur(); } catch (e) {} }
+    if (d) { d.removeAttribute("aria-modal"); try { d.inert = true; } catch (e) {} }
+    state._drawerReturn = null;
+  }
+  function drawDwrSpark(cv, data, color) {
+    cv._w = 308; cv._h = 46; var ctx = cctx(cv), w = cv._w, h = cv._h, pad = 13, n = data.length, bw = w / n;
+    var max = Math.max.apply(null, data.concat([1])), tc = themeColors();
+    for (var i = 0; i < n; i++) { var bh = Math.max(1, (data[i] / max) * (h - pad)); ctx.fillStyle = color; ctx.globalAlpha = 0.35 + 0.65 * (data[i] / max); ctx.fillRect(i * bw + 1, h - pad - bh, Math.max(1, bw - 1.5), bh); }
+    ctx.globalAlpha = 1; ctx.fillStyle = tc.faint; ctx.font = "9px ui-monospace,monospace"; ctx.textBaseline = "bottom";
+    for (var hh = 0; hh < 24; hh += 6) ctx.fillText((hh < 10 ? "0" : "") + hh + "h", hh * bw + 1, h);
+  }
+  // "N other threats from this source" / "...on this trail" used to be answered by walking EVERY
+  // threat on each drawer open - one Set probe and one normTrail call per threat, ~120k of each on
+  // a busy day, to produce two integers. One walk answers it for every threat at once, so it is
+  // done once per aggregate and read in O(1) after that. Built on the first drawer open rather
+  // than during load: an analyst who never opens a drawer never pays for it, and the walk is the
+  // same one that was happening on that click anyway.
+  var _dataVer = 0, _relIdx = null, _relIdxVer = -1;
+  function relIndex() {
+    if (_relIdx && _relIdxVer === _dataVer) return _relIdx;
+    var bySrc = new Map(), byTrail = new Map(), all = state.all;
+    for (var i = 0; i < all.length; i++) {
+      var x = all[i], nt = normTrail(x.trail);
+      byTrail.set(nt, (byTrail.get(nt) || 0) + 1);
+      // the union the old walk tested: the threat's primary source plus every distinct source its
+      // events carried (those differ only once the condensed set has hit its cap)
+      var vals = x.srcS && x.srcS.vals;
+      if (vals) {
+        vals.forEach(function (ip) { bySrc.set(ip, (bySrc.get(ip) || 0) + 1); });
+        if (!vals.has(x.src)) bySrc.set(x.src, (bySrc.get(x.src) || 0) + 1);
+      } else bySrc.set(x.src, (bySrc.get(x.src) || 0) + 1);
+    }
+    _relIdxVer = _dataVer;
+    return (_relIdx = { src: bySrc, trail: byTrail });
+  }
+  // Build the index while the browser is idle, so even the FIRST drawer open is cheap - that click
+  // is the one an analyst forms an impression from, and it would otherwise be the one that pays.
+  // Deferred again while a load is still streaming, where the next chunk would throw the work away.
+  function warmRelIndex() {
+    var go = function () {
+      if (_relIdxVer === _dataVer) return;              // already current
+      if (state.streaming) { warmRelIndex(); return; }  // try again after the next chunk settles
+      try { relIndex(); } catch (e) { /* a drawer open will just build it itself */ }
+    };
+    if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 3000 }); else setTimeout(go, 400);
+  }
+  function openDrawer(t) {
+    var d = document.getElementById("drawer"), sc = document.getElementById("drawer_scrim"); if (!d || !t) return;
+    var hue = (murmur3(t.uidc, 7) >>> 0) % 360, trg = state.triage[t.uidc];
+    var srcs = setList(t.srcS), dsts = setList(t.dstS), ports = setList(t.dportS), ev = t.events || [];
+    var sports = setList(t.sportS), protos = setList(t.protoS);
+    var _nt = normTrail(t.trail), _rel = relIndex();
+    // the index counts this threat too; the walk it replaces skipped it ("OTHER threats")
+    var relSrc = Math.max(0, (_rel.src.get(t.src) || 0) - 1),
+        relTrail = Math.max(0, (_rel.trail.get(_nt) || 0) - 1);
+    function chips(arr) { return arr.length ? arr.map(function (v) { return '<span class="dchip">' + esc(v) + '</span>'; }).join("") : '<span class="dwr-none">none</span>'; }
+    function protoChips(arr) {
+      if (!arr.length) return '<span class="dwr-none">none</span>';
+      return arr.map(function (v) { return '<span class="dchip dwr-f" data-f="proto:' + esc(v) + '" title="filter: proto ' + esc(v) + '">' + esc(v) + '</span>'; }).join("");
+    }
+    // source/dest IPs: data-ip so they get the same RIPE flag + country/ASN tooltip as the table cells
+    function ipChips(arr) {
+      if (!arr.length) return '<span class="dwr-none">none</span>';
+      return arr.map(function (v) {
+        var a = aliasOf(v);
+        return '<span class="dchip ip" data-ip="' + esc(v) + '">' + (isPrivIP(v) ? '<span class="lan" title="local / private network">' + LAN_ICON + '</span>' : '') + (a ? '<span class="ipcat" title="alias">' + esc(a) + '</span>' : '') + esc(v) + '</span>';
+      }).join("");
+    }
+    // ports: highlight notable/high-risk ones in the drawer too (consistent with the table)
+    function portChips(arr) {
+      if (!arr.length) return '<span class="dwr-none">none</span>';
+      return arr.map(function (p) {
+        var rk = riskyPort(p);
+        return '<span class="dchip' + (rk ? ' risky" title="' + esc(rk) : '') + '">' + esc(portLabel(p)) + '</span>';
+      }).join("");
+    }
+    var evShown = Math.min(200, ev.length);
+    var evRows = ev.slice(0, 200).map(function (r) {
+      return '<tr><td class="mono">' + esc(hms(r[0])) + '</td><td class="mono">' + esc(r[1]) + '</td><td class="mono">' + hostPort(r[2], r[3]) + '</td><td class="mono">' + hostPort(r[4], r[5]) + '</td><td>' + esc(r[6]) + '</td><td class="dwr-evtrail">' + esc(r[8]) + '</td></tr>';
+    }).join("");
+    var tcol = TYPE_COLORS[t.type] || "#8A97AD";
+    d.innerHTML =
+      '<div class="dwr-head ' + sevClass(t.sev) + '"><span class="sev-tag dwr-f" data-f="sev:' + sevName(t.sev) + '" title="filter: ' + sevName(t.sev) + ' severity">' + sevName(t.sev) + '</span>' +
+        '<span class="uid dwr-f ' + ltClass(hslText(hue, 0.60, 0.48)) + '" data-f="uid:' + t.uidc + '" style="background:hsl(' + hue + ',60%,48%);color:' + hslText(hue, 0.60, 0.48) + '" title="filter: this threat id">' + t.uidc + '</span>' +
+        '<span class="type dwr-f lt-w" data-f="type:' + esc(t.type) + '" style="background:' + tcol + ';color:#fff" title="filter: type ' + esc(t.type) + '">' + esc(t.type) + '</span>' +
+        '<div class="spacer"></div><button class="dwr-close" id="dwr_close" aria-label="close detail">\u2715</button></div>' +
+      '<div class="dwr-body">' +
+        '<div class="dwr-trail" title="' + esc(t.trail) + '">' + esc(t.trail) + '</div>' +
+        '<div class="dwr-info">' + esc(t.info) + (t.ref ? '  <span class="dwr-ref">' + esc(t.ref) + '</span>' : '') + '</div>' +
+        attackChipsHTML(t.info) +
+        '<div class="dwr-stats"><div><b>' + t.count + '</b><span>events</span></div><div><b>' + srcs.length + '</b><span>sources</span></div><div><b>' + dsts.length + '</b><span>dest</span></div><div><b>' + ports.length + '</b><span>ports</span></div></div>' +
+        '<canvas class="dwr-spark"></canvas>' +
+        '<div class="dwr-time">first ' + hms(t.first) + ' \u2192 last ' + hms(t.last) + ' \u00b7 span ' + durationStr(t.first, t.last) + '</div>' +
+        '<div class="dwr-netfirst" id="dwr_netfirst"></div>' +
+        '<div class="dwr-source" id="dwr_source"></div>' +
+        '<div class="dwr-status">' + ['investigating', 'resolved', 'fp'].map(function (k) { return '<button data-st="' + k + '" class="trbtn tr-' + k + (trg === k ? ' on' : '') + '">' + TRIAGE_LABEL[k] + '</button>'; }).join('') + '</div>' +
+        '<div class="dwr-actions"><button data-a="wls">whitelist src</button><button data-a="wlt">whitelist trail</button><button data-a="hide">' + (state.hidden[t.uidc] ? "unhide" : "hide") + '</button><button data-a="vt" class="ext">\u2197 VT</button><button data-a="abuse" class="ext">\u2197 AbuseIPDB</button><button data-a="shodan" class="ext">\u2197 Shodan</button><button data-a="copy">copy</button><button data-a="ioc">copy IOCs</button></div>' +
+        '<div class="dwr-local" role="note">⚠ status, whitelist, hide, tags &amp; notes are saved in <b>this browser only</b> — not shared with the sensor or other users</div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("tags") + '<span id="dwr_tags_h">tags</span></h4><div class="dchips" id="dwr_tags"></div>' +
+          '<input class="taginput dwr-taginput" id="dwr_tagadd" maxlength="24" aria-label="add a tag to this threat" placeholder="add a tag\u2026"></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("note") + 'note</h4><textarea class="dwr-note" id="dwr_note" aria-label="case note for this threat" placeholder="add a case note\u2026">' + esc(getNote(t.uidc)) + '</textarea></div>' +
+        '<div class="dwr-sec dwr-related"><h4>' + hdrIcon("related") + 'related</h4>' + '<button class="relbtn" data-rel="src"><b>' + relSrc + '</b> other threats from this source</button>' + '<button class="relbtn" data-rel="trail"><b>' + relTrail + '</b> other threats on this trail</button></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("sources") + 'sources \u00b7 ' + srcs.length + '</h4><div class="dchips">' + ipChips(srcs) + '</div></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("destinations") + 'destinations \u00b7 ' + dsts.length + '</h4><div class="dchips">' + ipChips(dsts) + '</div></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("ports") + 'destination ports \u00b7 ' + ports.length + '</h4><div class="dchips">' + portChips(ports) + '</div></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("ports") + 'source ports \u00b7 ' + sports.length + '</h4><div class="dchips">' + portChips(sports) + '</div></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("protocols") + 'protocols \u00b7 ' + protos.length + '</h4><div class="dchips">' + protoChips(protos) + '</div></div>' +
+        '<div class="dwr-sec"><h4>' + hdrIcon("events") + 'raw events \u00b7 ' + ev.length + (ev.length >= 500 ? "+" : "") + (evShown < ev.length ? " (showing " + evShown + ")" : "") + '</h4><div class="dwr-events"><table><thead><tr><th>time</th><th>sensor</th><th>source</th><th>dest</th><th>proto</th><th>trail</th></tr></thead><tbody>' + evRows + '</tbody></table></div></div>' +
+      '</div>';
+    d.querySelector("#dwr_close").onclick = closeDrawer;
+    _drawerFirstSeen(d, _nt);   // "network memory" line from meta.sqlite (first-seen / observation count)
+    _drawerSource(d, _nt);      // on-demand source citation (the trail's static-pile '# Reference:')
+    // clickable header chips: filter the table by this severity / threat-id / type, then close the drawer
+    d.querySelectorAll(".dwr-f").forEach(function (el) {
+      el.style.cursor = "pointer";
+      el.onclick = function () { var tok = el.getAttribute("data-f"); closeDrawer(); addFilter(tok); };
+    });
+    d.querySelector('[data-a="wls"]').onclick = function () { whitelistSrc(t.src); closeDrawer(); };
+    d.querySelector('[data-a="wlt"]').onclick = function () { whitelistTrail(t.trail); closeDrawer(); };
+    d.querySelector('[data-a="hide"]').onclick = function () { toggleHide(t.uidc); closeDrawer(); };
+    var _ext = threatExtIP(t);   // reputation lookups target the external malicious IP, not the LAN source
+    var _vtb = d.querySelector('[data-a="vt"]'), _abb = d.querySelector('[data-a="abuse"]'), _shb = d.querySelector('[data-a="shodan"]');
+    if (_ext) {
+      _vtb.onclick = function () { openLookup("vt-ip", _ext); }; _vtb.title = "VirusTotal · " + _ext;
+      _abb.onclick = function () { openLookup("abuse", _ext); }; _abb.title = "AbuseIPDB · " + _ext;
+      _shb.onclick = function () { openLookup("shodan", _ext); }; _shb.title = "Shodan · " + _ext;
+    } else {   // internal-only threat: no public IP worth checking (a LAN address on VT is meaningless)
+      _vtb.style.display = _abb.style.display = _shb.style.display = "none";
+    }
+    d.querySelector('[data-a="copy"]').onclick = function () { copyText([t.uidc, t.src, setList(t.dstS).join("|"), t.type, t.trail, t.info].join("  "), null); };
+    d.querySelector('[data-a="ioc"]').onclick = function () { var b = charTrim(charTrim(("" + t.trail).replace(/\([^)]*\)/g, "").replace(/\\\(/g, "").replace(/\\\)/g, ""), " "), "."); var arr = []; if (b) arr.push(b); setList(t.dstS).forEach(function (ip) { if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) arr.push(ip); }); copyText(arr.map(defang).join("\n"), null); };
+    d.querySelectorAll('[data-st]').forEach(function (b) { b.onclick = function () { var k = b.getAttribute('data-st'); setTriage(t.uidc, state.triage[t.uidc] === k ? null : k); closeDrawer(); }; });
+    var _na = d.querySelector('#dwr_note'); if (_na) _na.onblur = function () { setNote(t.uidc, _na.value); };
+    drawerTags(d, t);
+    var _ta = d.querySelector('#dwr_tagadd');
+    if (_ta) _ta.onkeydown = function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (_ta.value.trim()) { addTag(t.uidc, _ta.value); _ta.value = ""; drawerTags(d, t); _ta.focus(); }
+    };
+    var _rs = d.querySelector('[data-rel="src"]'); if (_rs) _rs.onclick = function () { closeDrawer(); state.filters = ['src:' + ('' + t.src).toLowerCase()]; state.input = ''; state.sev = null; state.page = 0; var f = document.getElementById('filter'); if (f) f.value = ''; refresh(); };
+    var _rt = d.querySelector('[data-rel="trail"]'); if (_rt) _rt.onclick = function () { closeDrawer(); state.filters = ['trail:' + _nt.toLowerCase()]; state.input = ''; state.sev = null; state.page = 0; var f = document.getElementById('filter'); if (f) f.value = ''; refresh(); };
+    state._drawerReturn = document.activeElement;                          // focus origin, captured before we move it
+    d.setAttribute("aria-modal", "true");
+    try { d.inert = false; } catch (e) {}
+    // Start the slide HERE. Everything below is work the panel does not need in order to begin
+    // moving, and doing it first put 80ms of dead air between the click and the first pixel of
+    // travel - which reads as an unresponsive click no matter how smooth the rest of the motion is.
+    // focus() alone was ~8ms because focusing inside the panel forces layout; the sparkline pulls
+    // theme colours out of getComputedStyle; enrichDrawerIPs walks the new chips and starts fetches.
+    d.classList.add("open"); if (sc) sc.classList.add("open");
+    // ...and run the tail once the slide has FINISHED, not on the next frame. On the next frame it
+    // landed the canvas draw, a layout-forcing focus() and the enrichment walk on the animation's
+    // second frame and dropped it - the panel travelled 174px in a single step, which is the jolt
+    // you see rather than a slide.
+    var done = false;
+    var tail = function () {
+      if (done) return;
+      done = true;
+      d.removeEventListener("transitionend", tail);
+      clearTimeout(state._dwrTail);
+      if (!d.classList.contains("open")) return;   // closed again before the slide ended
+      var cv = d.querySelector(".dwr-spark"); if (cv) drawDwrSpark(cv, t.hours, sevColor(t.sev));
+      var _cl = d.querySelector("#dwr_close"); if (_cl) _cl.focus();        // move focus into the dialog
+      enrichDrawerIPs();                                                     // country flags + ASN on source/dest chips
+    };
+    if (window.matchMedia && matchMedia("(prefers-reduced-motion:reduce)").matches) {
+      requestAnimationFrame(tail);          // no transition to wait for, so do not make focus wait
+    } else {
+      d.addEventListener("transitionend", tail);
+      clearTimeout(state._dwrTail);
+      state._dwrTail = setTimeout(tail, 320);   // fallback: an interrupted transition fires nothing
+    }
+  }
+
+  function openCtx(t, x, y) {
+    var m = document.getElementById("ctxmenu"); if (!m || !t) return;
+    var src = t.src, nt = normTrail(t.trail);
+    var bare = ("" + t.trail).replace(/\([^)]*\)/g, "").replace(/\\\(/g, "").replace(/\\\)/g, "").trim();
+    var domish = (/^[a-z0-9._-]+\.[a-z]{2,}$/i.test(bare)) ? bare : null;   // looks like a hostname
+    var ntShort = nt.length > 26 ? nt.slice(0, 25) + "…" : nt;
+    var fam = familyOf(t.info), famShort = fam.length > 26 ? fam.slice(0, 25) + "…" : fam;
+    var items = [
+      ["Hide this threat", function () { toggleHide(t.uidc); }, ""],
+      "sep",
+      ["◴ investigating", function () { setTriage(t.uidc, "investigating"); }, "tr-investigating"],
+      ["✓ resolved", function () { setTriage(t.uidc, "resolved"); }, "tr-resolved"],
+      ["⊘ false-positive", function () { setTriage(t.uidc, "fp"); }, "tr-fp"],
+      ["clear status", function () { setTriage(t.uidc, null); }, ""],
+      "sep",
+      ["Whitelist source  " + src, function () { whitelistSrc(src); }, ""],
+      ["Whitelist trail  " + ntShort, function () { whitelistTrail(t.trail); }, ""],
+      "sep",
+      ["Filter → only this source", function () { addFilter("src:" + src); }, ""],
+      ["Filter → exclude this source", function () { addFilter("-src:" + src); }, ""],
+      ["Filter → only this trail", function () { addFilter("trail:" + nt); }, ""]
+    ];
+    // the whole campaign, shards included - "interlock-2" alone hides two thirds of the incident
+    if (fam) items.push(["Filter → this campaign  " + famShort, function () { addFilter("family:" + fam); }, ""]);
+    items = items.concat([
+      "sep",
+      ["✎ Alias source  " + src, function () { openAlias(src); }, ""],
+      ["Copy row", function () { copyText([t.uidc, src, setList(t.dstS).join("|"), setList(t.dportS).join("|"), t.type, t.trail, t.info].join("  "), null); }, ""]
+    ]);
+    // reputation lookups target the external malicious IP (trail-IP / public dst / public src), labelled with the
+    // actual IP so it's unambiguous — never a pointless LAN-source lookup. Omitted for internal-only threats.
+    var _ext = threatExtIP(t);
+    if (_ext) {
+      items.push("sep");
+      items.push(["↗ VirusTotal · " + _ext, function () { openLookup("vt-ip", _ext); }, "ext"]);
+      items.push(["↗ AbuseIPDB · " + _ext, function () { openLookup("abuse", _ext); }, "ext"]);
+      items.push(["↗ Shodan · " + _ext, function () { openLookup("shodan", _ext); }, "ext"]);
+    }
+    // reverse DNS through the server's resolver: the outside party, and the local host (its internal name)
+    (DEMO ? [] : [_ext, src]).filter(function (ip, i, a) { return ip && /^[\d.]+$|:/.test(ip) && a.indexOf(ip) === i; }).forEach(function (ip, i) {
+      if (!i) items.push("sep");
+      items.push(["⇄ Reverse DNS · " + ip, function () { showPTR(ip); }, ""]);
+    });
+    if (domish) {
+      items.push(["↗ VirusTotal · trail", function () { openLookup("vt-dom", domish); }, "ext"]);
+      items.push(["↗ urlscan · trail", function () { openLookup("urlscan", domish); }, "ext"]);
+    }
+    m.innerHTML = "";
+    items.forEach(function (it) {
+      if (it === "sep") { var d = document.createElement("div"); d.className = "ctxsep"; m.appendChild(d); return; }
+      var b = document.createElement("button"); b.type = "button"; b.className = "ctxitem" + (it[2] ? " " + it[2] : ""); b.textContent = it[0];
+      b.onclick = function (e) { e.stopPropagation(); closeCtx(); it[1](); };
+      m.appendChild(b);
+    });
+    m.style.display = "block"; m.setAttribute("aria-hidden", "false");
+    // zoom-safe placement (same as the hover tip): the A-/A+ CSS zoom on <html> would otherwise drift this
+    // menu away from the cursor. Place at the cursor, then keep it inside the viewport via its measured rect.
+    var vw = window.innerWidth, vh = window.innerHeight, put = _fixedPlacer(m);
+    put(x, y);
+    var f = m.getBoundingClientRect();
+    if (f.right > vw - 6) put(Math.max(6, vw - 6 - f.width), y);
+    f = m.getBoundingClientRect(); if (f.bottom > vh - 6) put(f.left, Math.max(6, vh - 6 - f.height));
+  }
+  function showPTR(ip) {
+    var o = document.createElement("div"); o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal"><div class="modal-h">Reverse DNS · ' + esc(ip) + '</div><div class="wllist">resolving…</div>' +
+      '<div class="localwarn" role="note">A PTR name is set by whoever controls the address: a hint, not proof of who runs it.</div>' +
+      '<div class="modal-actions"><button class="btn-ghost">Close</button></div></div>';
+    document.body.appendChild(o);
+    var close = function () { o.remove(); };
+    o.onclick = function (e) { if (e.target === o) close(); };
+    o.querySelector("button").onclick = close;
+    var out = o.querySelector(".wllist");
+    fetch("/ptr?address=" + encodeURIComponent(ip), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        out.innerHTML = !d ? '<div class="wlempty">lookup failed</div>'
+          : !d.names.length ? '<div class="wlempty">no PTR record</div>'
+          : d.names.map(function (n) { return '<div class="wlrow"><span class="wlval">' + esc(n) + '</span></div>'; }).join("");
+      })
+      .catch(function () { out.innerHTML = '<div class="wlempty">lookup failed</div>'; });
+  }
+  function showWLManage() {
+    closeCtx();
+    if (document.getElementById("wl_overlay")) return;
+    var o = document.createElement("div"); o.id = "wl_overlay"; o.className = "modal-overlay";
+    var rows = "";
+    Object.keys(state.wl.src).forEach(function (ip) { rows += '<div class="wlrow"><span class="wltag">src</span><span class="wlval">' + esc(ip) + '</span><button class="wlrm" data-k="src" data-v="' + esc(ip) + '">remove</button></div>'; });
+    Object.keys(state.wl.trail).forEach(function (tr) { rows += '<div class="wlrow"><span class="wltag">trail</span><span class="wlval">' + esc(tr) + '</span><button class="wlrm" data-k="trail" data-v="' + esc(tr) + '">remove</button></div>'; });
+    if (!rows) rows = '<div class="wlempty">No whitelist rules yet. Right-click a threat to add one.</div>';
+    o.innerHTML = '<div class="modal"><div class="modal-h">Whitelist rules</div>' +
+      '<div class="localwarn" role="note">⚠ <b>This browser only.</b> These rules just hide matching threats in <i>your</i> view — they are <b>not</b> sent to sensors and the sensor keeps detecting &amp; logging them. To suppress at the source, add them to the sensor whitelist (<code>data/whitelist.txt</code> or <code>USER_WHITELIST</code>) instead.</div>' +
+      '<div class="wllist">' + rows + '</div>' +
+      '<div class="modal-actions"><button class="btn-ghost" id="wl_close">Close</button><button class="btn-primary" id="wl_clear">Clear all</button></div></div>';
+    document.body.appendChild(o);
+    o.onclick = function (e) { if (e.target === o) o.remove(); };
+    o.querySelector("#wl_close").onclick = function () { o.remove(); };
+    o.querySelector("#wl_clear").onclick = function () { clearWL(); o.remove(); };
+    o.querySelectorAll(".wlrm").forEach(function (b) { b.onclick = function () { unWL(b.getAttribute("data-k"), b.getAttribute("data-v")); o.remove(); showWLManage(); }; });
+  }
+
+  // per-threat tags (UID-keyed; value is a comma-joined string, same shape as the legacy jStorage tagData)
+  var LS_TAGS = "mt_tags_v2";
+  function loadTags() { var o = lsGet(LS_TAGS, {}); return (o && typeof o === "object") ? o : {}; }
+  function saveTags() { lsSet(LS_TAGS, state.tags); }
+  // ---- triage status (New / Investigating / Resolved / False-positive) ----
+  var LS_TRIAGE = "mt_triage_v2", TRIAGE_LABEL = { investigating: "investigating", resolved: "resolved", fp: "false-pos" };
+  function loadTriage() { var o = lsGet(LS_TRIAGE, {}); return (o && typeof o === 'object') ? o : {}; }
+  function saveTriage() { lsSet(LS_TRIAGE, state.triage); }
+  function setTriage(uid, key) { if (!uid) return; if (key) state.triage[uid] = key; else delete state.triage[uid]; saveTriage(); refresh(); }
+  // ---- per-threat notes ----
+  var LS_NOTES = "mt_notes_v2";
+  function loadNotes() { var o = lsGet(LS_NOTES, {}); return (o && typeof o === 'object') ? o : {}; }
+  function saveNotes() { lsSet(LS_NOTES, state.notes); }
+  function getNote(uid) { return state.notes[uid] || ''; }
+  function setNote(uid, text) { text = ('' + text).trim(); if (text) state.notes[uid] = text.slice(0, 2000); else delete state.notes[uid]; saveNotes(); refresh(); }
+  // user-defined IP aliases (localStorage). Merged with server-injected IP_ALIASES (user value wins).
+  var LS_ALIAS = "mt_aliases_v2";
+  function loadAliases() { var o = lsGet(LS_ALIAS, {}); return (o && typeof o === 'object') ? o : {}; }
+  function saveAliases() { lsSet(LS_ALIAS, state.aliases); }
+  function aliasOf(ip) { return (state.aliases && state.aliases[ip]) || IP_ALIASES[ip] || ''; }
+  function setAlias(ip, name) { name = ('' + name).trim().slice(0, 40); if (name) state.aliases[ip] = name; else delete state.aliases[ip]; saveAliases(); refresh(); }
+  function tagsOf(uid) { var s = state.tags[uid]; return s ? s.split(",").filter(Boolean) : []; }
+  function addTag(uid, tag) {
+    tag = ("" + tag).trim().replace(/[,|]/g, "").slice(0, 24);
+    if (!uid || !tag) { refresh(); return; }
+    var t = tagsOf(uid); if (t.indexOf(tag) < 0) { t.push(tag); state.tags[uid] = t.join(","); saveTags(); }
+    refresh();
+  }
+  function removeTag(uid, tag) {
+    var t = tagsOf(uid).filter(function (x) { return x !== tag; });
+    if (t.length) state.tags[uid] = t.join(","); else delete state.tags[uid];
+    saveTags(); refresh();
+  }
+  // One-time import of the legacy frontend's jStorage data (hidden threats + per-threat tags). Both are keyed by
+  // threatUID, which is byte-identical to ours (verified), so an upgrading user keeps their hidden list and tags.
+  function migrateLegacy() {
+    try {
+      if (localStorage.getItem("mt_migrated")) return;
+      var raw = localStorage.getItem("jStorage");
+      if (raw) {
+        var js = JSON.parse(raw), uidRe = /^[0-9a-f]{8}$|^[0-9a-f]{6}(F0|D0|N0)$/;
+        var hid = js["STORAGE_KEY_HIDDEN_THREATS"];
+        if (hid && typeof hid === "object") { for (var h in hid) if (hid[h]) state.hidden[h] = 1; }
+        for (var k in js) {
+          if (k === "__jstorage_meta") continue;
+          var v = js[k];
+          if (uidRe.test(k) && v && typeof v === "object" && v.tagData != null) {
+            var t = ("" + v.tagData).split(/[|,]/).filter(Boolean);
+            if (t.length) state.tags[k] = t.join(",");
+          }
+        }
+        saveHidden(); saveTags();
+      }
+      localStorage.setItem("mt_migrated", "1");
+    } catch (e) { /* ignore malformed/absent legacy storage */ }
+  }
+
+  var state = { all: [], agg: null, chart: null, _openChart: "", filters: [], input: "", sev: null, sortKey: "sev", sortDir: -1, limit: 25, page: 0, hidden: loadHidden(), showHidden: false, tags: loadTags(), streaming: false, _loadSeq: 0, selIdx: -1, _pageRows: [] };
+  state.wl = loadWL(); state.triage = loadTriage(); state.notes = loadNotes(); state.aliases = loadAliases();
+  state.live = false; state.knownUids = {}; state.newUids = {}; state.newCount = 0; state._seenInit = false; state._liveTimer = null; state._ac = null;
+  state._liveBytes = null; state._liveDate = null;   // incremental-live baseline: byte offset + date (aggregate itself carries _byKey for merging)
+  state._connected = true; state._serverReachable = null;   // null=unknown -> fall back to navigator.onLine; true/false set by fetches
+  state._es = null; state._liveBuf = []; state._liveBufDate = null; state._liveFlush = null; state._sseOk = false;   // SSE push stream + dated line batch
+
+  function hay(t) {
+    // _hay (all distinct values across the threat's events) is built lazily here on first free-text search and
+    // cached; mergeRows invalidates it (null) when new events fold in. Tags are appended live (cheap).
+    if (t._hay == null) t._hay = threatHay(t);
+    return t._hay + " " + (state.tags[t.uidc] || "").toLowerCase();
+  }
+
+  // ===== query syntax: field-scoped tokens (src: dst: port: proto: type: trail: info: family: tag: uid: sev: dir: status:) + * wildcards =====
+  function _lc(x) { return ("" + x).toLowerCase(); }
+  // The campaign behind an info field, with the class marker and the feed's shard suffix removed:
+  // "interlock-1 (malware)" -> "interlock". Big dumps arrive split into interlock / interlock-1 /
+  // interlock-2 (224k trails here, 13% of the set), which is one incident wearing three names, and
+  // nothing in the UI could pull them back together. Only a 1-2 digit suffix is a shard - a name
+  // like "cve-2021-44228" keeps its number.
+  // Memoized like normTrail: a family: term runs this per threat per keystroke, and info fields
+  // repeat across thousands of rows.
+  var _famCache = Object.create(null), _famCacheN = 0;
+  function familyOf(info) {
+    var c = _famCache[info];
+    if (c !== undefined) return c;
+    if (_famCacheN > 20000) { _famCache = Object.create(null); _famCacheN = 0; }
+    c = ("" + info).replace(/\s*\([^)]*\)\s*$/, "").replace(/-\d{1,2}$/, "").trim().toLowerCase();
+    _famCache[info] = c; _famCacheN++;
+    return c;
+  }
+  // memoized: _fieldMatch is called per-threat, so a wildcard term (trail:*.ru) would otherwise recompile this
+  // regex once PER ROW per keystroke (120k× at the threat cap). The pattern is identical across the whole pass.
+  var _globCache = Object.create(null), _globN = 0;
+  function _glob(v) { var r = _globCache[v]; if (r) return r; if (_globN > 500) { _globCache = Object.create(null); _globN = 0; } r = new RegExp("^" + v.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$"); _globCache[v] = r; _globN++; return r; }
+  // lowercased text values for a field. null => not a known text field (numeric/enum fields handled in matchPos).
+  function _fieldVals(f, t) {
+    switch (f) {
+      case "src": return setList(t.srcS).map(_lc);
+      case "dst": return setList(t.dstS).map(_lc);
+      case "port": return setList(displayPortSet(t));
+      case "proto": return setList(t.protoS).map(_lc);
+      case "type": return [_lc(t.type)];
+      case "trail": return [_lc(t.trail)];
+      case "info": return [_lc(t.info)];
+      case "family": return [familyOf(t.info)];
+      case "tag": return tagsOf(t.uidc).map(_lc);
+      case "note": return [_lc(getNote(t.uidc))];
+      case "uid": return [_lc(t.uidc)];
+      case "sensor": return setList(t.sensorS).map(_lc);
+      case "class": var m = ("" + t.info).match(/\(([^)]+)\)\s*$/); return [m ? m[1].toLowerCase().trim() : ""];   // the malware/suspicious/heuristic/... class in the info field
+      default: return null;
+    }
+  }
+  function _ip2int(ip) { var p = ("" + ip).split("."); if (p.length !== 4) return null; var n = 0; for (var i = 0; i < 4; i++) { if (p[i] === "" || !/^\d+$/.test(p[i])) return null; var o = +p[i]; if (o > 255) return null; n = n * 256 + o; } return n >>> 0; }
+  // CIDR subnet match (src:10.0.0.0/8). returns null when `part` isn't CIDR syntax -> caller falls back to substring.
+  function _cidr(part, ips) {
+    var m = part.match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/); if (!m) return null;
+    var base = _ip2int(m[1]), bits = +m[2]; if (base == null || bits > 32) return false;
+    var mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0, net = (base & mask) >>> 0;
+    return ips.some(function (ip) { var v = _ip2int(ip); return v != null && ((v & mask) >>> 0) === net; });
+  }
+  // numeric match for port/count/events: exact (443), range (1000-2000), compare (>1024,<=80,>=100,<5)
+  function _cmpNum(part, nums) {
+    var m;
+    if (m = part.match(/^(>=|<=|>|<)(\d+)$/)) { var op = m[1], k = +m[2]; return nums.some(function (x) { return op === ">" ? x > k : op === "<" ? x < k : op === ">=" ? x >= k : x <= k; }); }
+    if (m = part.match(/^(\d+)-(\d+)$/)) { var lo = +m[1], hi = +m[2]; return nums.some(function (x) { return x >= lo && x <= hi; }); }
+    if (/^\d+$/.test(part)) { var n = +part; return nums.some(function (x) { return x === n; }); }
+    return false;   // non-numeric part for a numeric field -> no match
+  }
+  function _matchText(f, part, vals) {
+    if (part.indexOf("*") >= 0) { var re = _glob(part); return vals.some(function (x) { return re.test(x); }); }   // glob
+    if (f === "src" || f === "dst") { var c = _cidr(part, vals); if (c !== null) return c; }                        // CIDR (else fall through)
+    return vals.some(function (x) { return x.indexOf(part) >= 0; });                                                // substring
+  }
+  // a field-scoped token field:value. value may be a comma-OR list (type:dns,http); each part may be exact /
+  // substring / glob / numeric range or compare / CIDR. quoted=true (info:"a, b") => literal phrase: no splitting.
+  function matchPos(t, tok, quoted) {
+    if (!tok) return true;
+    var ci = tok.indexOf(":");
+    if (ci > 0) {
+      var f = tok.slice(0, ci), v = tok.slice(ci + 1); if (!v) return true;
+      if (f === "sev") return v.split(",").some(function (p) { var m = { high: 3, hi: 3, "3": 3, med: 2, medium: 2, "2": 2, low: 1, lo: 1, "1": 1 }; return m[p] === t.sev; });
+      if (f === "dir") { var d = portDir(t); if (!d) return false; return v.split(",").some(function (p) { var m = { out: "out", outbound: "out", egress: "out", resp: "out", response: "out", reply: "out", "in": "in", inbound: "in", ingress: "in", req: "in", request: "in" }; return m[p] === d; }); }   // flagged-traffic direction of the port cell (→ out / ← in)
+      if (f === "status") return v.split(",").some(function (p) { var st = state.triage[t.uidc] || "new"; if (p === "false-positive" || p === "false-pos") p = "fp"; if (p === "untriaged" || p === "open") p = "new"; return st === p; });
+      if (f === "port" || f === "count" || f === "events") { var nums = f === "port" ? setList(displayPortSet(t)).map(Number) : [t.count]; return v.split(",").some(function (p) { return _cmpNum(p, nums); }); }
+      var vals = _fieldVals(f, t);
+      if (vals !== null) {
+        if (quoted) return vals.some(function (x) { return x.indexOf(v) >= 0; });               // literal quoted phrase
+        return v.split(",").some(function (p) { return p && _matchText(f, p, vals); });         // comma-OR list
+      }
+      // unknown field -> fall through to whole-token substring (e.g. a bare "1.2.3.4:443")
+    }
+    return hay(t).indexOf(tok) >= 0;
+  }
+  function matchToken(t, raw, quoted) {
+    if (raw.charAt(0) === "-") { var r = raw.slice(1); return r ? !matchPos(t, r, quoted) : true; }
+    return matchPos(t, raw, quoted);
+  }
+
+  // ---- boolean search language ----
+  // precedence (loosest first): OR  <  AND  <  NOT  <  primary
+  //   or      := and ( ("OR" | "||") and )*
+  //   and     := not ( ("AND" | "&&" | <adjacent term>) not )*    // adjacency = implicit AND
+  //   not     := ("NOT" | "!") not | primary
+  //   primary := "(" or ")" | TERM
+  // TERM is a matchToken token: field:val, bare substring, wildcard; a leading "-" still negates
+  // (back-compat). Double quotes group a phrase incl. spaces/operators: info:"command and control".
+  function lexQuery(s) {
+    var toks = [], i = 0, n = s.length, c, d, buf;
+    while (i < n) {
+      c = s.charAt(i);
+      if (c === " " || c === "\t") { i++; continue; }
+      if (c === "(" || c === ")") { toks.push(c); i++; continue; }
+      if (c === "&" && s.charAt(i + 1) === "&") { toks.push("AND"); i += 2; continue; }
+      if (c === "|" && s.charAt(i + 1) === "|") { toks.push("OR"); i += 2; continue; }
+      if (c === "!" && s.charAt(i + 1) !== "=") { toks.push("NOT"); i++; continue; }
+      buf = ""; var hadQuote = false;
+      while (i < n) {
+        d = s.charAt(i);
+        if (d === '"') { hadQuote = true; i++; while (i < n && s.charAt(i) !== '"') { buf += s.charAt(i); i++; } if (i < n) i++; continue; }
+        if (d === " " || d === "\t" || d === "(" || d === ")") break;
+        if ((d === "&" && s.charAt(i + 1) === "&") || (d === "|" && s.charAt(i + 1) === "|")) break;
+        buf += d; i++;
+      }
+      var up = buf.toUpperCase();
+      if (!hadQuote && (up === "AND" || up === "OR" || up === "NOT")) toks.push(up);   // a quoted "AND" is a literal term, not an operator
+      else if (buf) toks.push({ v: buf, q: hadQuote });
+    }
+    return toks;
+  }
+  function termFn(tk) { var tok = tk.v.toLowerCase(), q = tk.q; return function (t) { return matchToken(t, tok, q); }; }
+  function andFn(a, b) { return !a ? b : !b ? a : function (t) { return a(t) && b(t); }; }
+  function orFn(a, b)  { return !a ? b : !b ? a : function (t) { return a(t) || b(t); }; }
+  function notFn(a)    { return !a ? null : function (t) { return !a(t); }; }
+  // compile the query string into a single predicate t => bool (true-for-all when empty/blank)
+  function compileQuery(str) {
+    var toks = lexQuery(str || ""), pos = 0;
+    function peek() { return toks[pos]; }
+    function pOr() { var l = pAnd(); while (peek() === "OR") { pos++; l = orFn(l, pAnd()); } return l; }
+    function pAnd() {
+      var l = pNot();
+      while (pos < toks.length && peek() !== "OR" && peek() !== ")") {
+        if (peek() === "AND") pos++;
+        l = andFn(l, pNot());
+      }
+      return l;
+    }
+    function pNot() { if (peek() === "NOT") { pos++; return notFn(pNot()); } return pPrimary(); }
+    function pPrimary() {
+      var tk = peek();
+      if (tk === undefined) return null;
+      if (tk === "(") { pos++; var e = pOr(); if (peek() === ")") pos++; return e; }
+      if (tk === ")" || tk === "AND" || tk === "OR" || tk === "NOT") { pos++; return null; }
+      pos++; return termFn(tk);
+    }
+    return pOr() || function () { return true; };
+  }
+  // The whole grid pipeline: filter every threat, then sort the survivors. refresh() calls this for
+  // sorting and filtering - but ALSO for paging and for changing the page size, which change
+  // neither. Moving to page 2 of an unchanged view was re-filtering ~70k threats and re-sorting
+  // them just to slice out 25 rows.
+  //
+  // So both halves are memoized against exactly the state they read: the filter against the query,
+  // chips, severity and _viewVer; the sort against that plus the sort key and direction. Changing
+  // only the sort therefore keeps the filter pass, and paging keeps both.
+  function viewList() {
+    // The expensive half of the filter - the whitelist probe, the chip tokens and the compiled
+    // query - is cached WITHOUT the severity buttons, because severity is a single integer compare
+    // on a field that never changes after a threat is built. Clicking high/medium/low/all is one of
+    // the most-used controls on the page and it was re-running the whole chain over every threat.
+    var bsig = _viewVer + "\u0001" + (state.showHidden ? 1 : 0) +
+               "\u0001" + state.input + "\u0001" + state.filters.join("\u0002");
+    var base = state._vbList;
+    if (state._vbSig !== bsig || !base) {
+      var chips = state.filters, q = compileQuery(state.input);
+      var hidden = state.hidden, showH = state.showHidden;
+      base = state.all.filter(function (t) {
+        if (!showH && hidden[t.uidc]) return false;
+        if (isWL(t)) return false;
+        for (var ci = 0; ci < chips.length; ci++) if (!matchToken(t, chips[ci])) return false;
+        return q(t);
+      });
+      state._vbSig = bsig; state._vbList = base; state._vlSig = null; state._vsSig = null;
+    }
+    var fsig = bsig + "\u0001" + state.sev;
+    var filtered = state._vlList;
+    if (state._vlSig !== fsig || !filtered) {
+      var sv = state.sev;
+      filtered = sv == null ? base : base.filter(function (t) { return t.sev === sv; });
+      state._vlSig = fsig; state._vlList = filtered; state._vsSig = null;
+    }
+    var ssig = fsig + "\u0001" + state.sortKey + "\u0001" + state.sortDir;
+    if (state._vsSig === ssig && state._vsList) return state._vsList;
+    var k = state.sortKey, dir = state.sortDir;
+    // Decorate, sort a permutation, undecorate. The comparator used to DERIVE each row's key on
+    // every comparison - about two million of them per sort of a busy day - so sorting by source
+    // ran a memoised ipKey lookup four million times, and the string columns rebuilt a coerced
+    // string per comparison. Each key is computed once here instead, and only the permutation is
+    // sorted; the comparator then reads two array slots.
+    //
+    // Identical ordering: the same key expressions, the same count tiebreak, the same direction,
+    // and the index array starts ascending so V8's stable sort leaves full ties in their original
+    // relative order - exactly what sorting the rows directly did.
+    var n = filtered.length, i;
+    var numeric = (k === "sev" || k === "count" || k === "dport");
+    var keys = numeric ? new Float64Array(n) : new Array(n);
+    if (k === "sev") for (i = 0; i < n; i++) keys[i] = riskOf(filtered[i]);   // "severity" column = risk-ranked (severity-dominant, then compromise signal / volume within a band)
+    else if (k === "count") for (i = 0; i < n; i++) keys[i] = filtered[i].count;
+    else if (k === "dport") for (i = 0; i < n; i++) keys[i] = parseInt(filtered[i].dport, 10) || 0;
+    else if (k === "src" || k === "dst") for (i = 0; i < n; i++) keys[i] = ipKey(filtered[i][k]);
+    else for (i = 0; i < n; i++) keys[i] = (filtered[i][k] || "") + "";
+    var cnt = new Float64Array(n);
+    for (i = 0; i < n; i++) cnt[i] = filtered[i].count;
+    var idx = new Array(n);
+    for (i = 0; i < n; i++) idx[i] = i;
+    idx.sort(numeric
+      ? function (a, b) { var c = keys[a] - keys[b]; if (c === 0) c = cnt[b] - cnt[a]; return c * dir; }
+      : function (a, b) { var x = keys[a], y = keys[b], c = x < y ? -1 : x > y ? 1 : 0; if (c === 0) c = cnt[b] - cnt[a]; return c * dir; });
+    var list = new Array(n);
+    for (i = 0; i < n; i++) list[i] = filtered[idx[i]];
+    state._vsSig = ssig; state._vsList = list;
+    return list;
+  }
+  function renderSevFilter() {
+    var el = document.getElementById("sevfilter"); if (!el || !state.agg) return;
+    var sc = state.agg.sevCount, defs = [[3, "high"], [2, "med"], [1, "low"]];
+    var h = '<button class="sevpill' + (state.sev == null ? " on" : "") + '" data-sev="all">all</button>';
+    defs.forEach(function (d) {
+      h += '<button class="sevpill s' + d[0] + (state.sev === d[0] ? " on" : "") + '" data-sev="' + d[0] + '">' +
+        d[1] + ' <b>' + (sc[d[0]] || 0) + '</b></button>';
+    });
+    el.innerHTML = h;
+    el.querySelectorAll("[data-sev]").forEach(function (b) {
+      b.onclick = function () { var v = b.getAttribute("data-sev"); state.sev = v === "all" ? null : +v; state.page = 0; refresh(); };
+    });
+  }
+  function renderChips() {
+    var c = document.getElementById("chips"); if (!c) return; c.innerHTML = "";
+    state.filters.forEach(function (f, i) {
+      var ex = f.charAt(0) === "-";
+      var s = document.createElement("span"); s.className = "chip" + (ex ? " exclude" : "");
+      s.innerHTML = (ex ? '≠ ' + esc(f.slice(1)) : esc(f)) + ' <span class="x">✕</span>';
+      s.querySelector(".x").onclick = function () { state.filters.splice(i, 1); state.page = 0; refresh(); };
+      c.appendChild(s);
+    });
+    if (state.filters.length + (state.sev != null ? 1 : 0) >= 2 || (state.filters.length && state.input.trim())) {
+      var clr = document.createElement("button"); clr.className = "clearall"; clr.type = "button"; clr.textContent = "clear all";
+      clr.onclick = function () {
+        state.filters = []; state.input = ""; state.sev = null; state.page = 0;
+        var f = document.getElementById("filter"); if (f) f.value = ""; refresh();
+      };
+      c.appendChild(clr);
+    }
+  }
+  function renderRows(list) {
+    var tb = document.getElementById("rows"); tb.innerHTML = "";
+    var n = list.length, frag = document.createDocumentFragment();
+    if (!n) {
+      var active = state.filters.length || state.input.trim();
+      tb.innerHTML = '<tr><td colspan="14" class="emptystate">' +
+        (active ? 'No threats match the current filter. <a href="#" data-clear="1">clear filters</a>'
+                : 'No threats for this day. ✓') + '</td></tr>';
+      var cl = tb.querySelector("[data-clear]");
+      if (cl) cl.onclick = function (e) { e.preventDefault(); state.filters = []; state.input = ""; var f = document.getElementById("filter"); if (f) f.value = ""; state.page = 0; refresh(); };
+      return;
+    }
+    for (var i = 0; i < n; i++) {
+      var t = list[i], tc = TYPE_COLORS[t.type] || "#8A97AD", isH = !!state.hidden[t.uidc];
+      var cls = sevClass(t.sev) + (isH ? " ishidden" : "") + (state.newUids[t.uidc] ? " isnew" : "");
+      var hue = (murmur3(t.uidc, 7) >>> 0) % 360; var trg = state.triage[t.uidc];                                 // deterministic per-threat color
+      // condense only REAL grouping parens; escaped \\( \\) are literal chars (legacy main.js:634) — never condensed
+      // escaped \( \) are literal chars (legacy main.js:634); placeholders keep them out of grouping-paren detection
+      var ftrailPH = ("" + t.trail).replace(/\\\(/g, "\uE000").replace(/\\\)/g, "\uE001");
+      var ftrail = ftrailPH.replace(/\uE000/g, "(").replace(/\uE001/g, ")");   // full value (tooltip + copy)
+      var allTags = tagsOf(t.uidc), tagHtml = allTags.slice(0, 2).map(function (tg) {
+        return '<span class="tag" data-f="tag:' + esc(tg) + '">' + esc(tg) +
+          '<span class="tx" data-untag="' + t.uidc + '|' + esc(tg) + '" title="remove tag">×</span></span>';
+      }).join("");
+      if (allTags.length > 2) tagHtml += '<span class="tagmore" title="' + esc(allTags.join(", ")) + '\u2003open the detail panel to edit all of them">+' + (allTags.length - 2) + '</span>';
+      var tr = document.createElement("tr"); tr.className = cls; tr.dataset.ri = i;
+      tr.innerHTML =
+        '<td data-l="threat"><div class="threatline"><span class="uid ' + ltClass(hslText(hue, 0.60, 0.48)) + '" data-f="uid:' + t.uidc + '" title="filter: this threat id" style="background:hsl(' + hue + ',60%,48%);color:' + hslText(hue, 0.60, 0.48) + '">' + t.uidc + '</span>' +
+          (trg ? '<span class="trbadge tr-' + trg + '">' + TRIAGE_LABEL[trg] + '</span>' : '') +
+          (getNote(t.uidc) ? '<span class="noteind" title="has a note">\u270E</span>' : '') +
+          '<button class="rowhide" data-hide="' + t.uidc + '" title="' + (isH ? "restore threat" : "hide threat") +
+          '" aria-label="' + (isH ? "restore threat" : "hide threat") + '">' + (isH ? "↺" : "✕") + '</button>' +
+          '</div></td>' +
+        '<td class="mono muted" data-l="sensor">' + sensorCellSet(t.sensorS) + '</td>' +
+        '<td data-l="events"><span class="count">' + t.count + '×</span></td>' +
+        '<td class="sev" data-l="severity"><span class="sev-bar"></span><span class="sev-tag" data-f="sev:' + sevName(t.sev) + '" title="filter: ' + sevName(t.sev) + ' severity">' + sevName(t.sev) + '</span></td>' +
+        '<td class="sparkcol" data-l="sparkline">' + rowSpark(t.hours) + '</td>' +
+        '<td data-l="source">' + ipCellSet(t.srcS) + '</td>' +
+        '<td data-l="destination">' + ipCellSet(t.dstS) + '</td>' +
+        '<td class="mono" data-l="port"' + portCellTip(t) + '>' + portCellSet(displayPortSet(t)) + portDirHint(t) + '</td>' +
+        '<td class="mono muted" data-l="proto">' + protoCellSet(t.protoS) + '</td>' +
+        '<td data-l="type"><span class="type lt-w" data-f="type:' + esc(t.type) + '" title="filter: type ' + esc(t.type) + '" style="background:' + tc + ';color:#fff">' + esc(t.type) + '</span></td>' +
+        '<td data-l="trail">' + originGlyph(t.ref) + '<span class="trail" data-tip="' + esc(ftrail) + '">' + trailCellHtml(ftrailPH, ftrail) + '</span></td>' +
+        '<td class="mono muted" data-l="info">' +
+          (function () { var ic = classOf(t.info, t.ref), desc = ("" + t.info).replace(/\s*\((?:malware|malicious|suspicious)\)\s*$/i, "");
+            return (ic ? '<span class="cls cls-' + ic + '" data-tip="' + ic + '" aria-label="' + ic + '">' + CLASS_ICON[ic] + '</span>' : '') +
+                   '<span class="clip" data-tip="' + esc(t.info) + '">' + esc(desc) + '</span>'; })() + '</td>' +
+        '<td class="mono muted" data-l="first seen" data-tip="first ' + hms(t.first) + ' → last ' + hms(t.last) +
+          '  ·  span ' + durationStr(t.first, t.last) + '  ·  ' + t.count + ' events"><span class="reltime" data-ts="' + esc(t.first) + '">' + esc(relAge(t.first) || hms(t.first)) + '</span></td>' +
+        '<td class="tagcol" data-l="tags"><div class="tagcell">' + tagHtml +
+          '<button class="tagadd" data-tag="' + t.uidc + '" title="add tag">+tag</button></div></td>';
+      frag.appendChild(tr);
+    }
+    tb.appendChild(frag);
+    // click a severity tag or type chip -> add as filter
+    tb.querySelectorAll("[data-f]").forEach(function (el) {
+      el.style.cursor = "pointer";
+      el.onclick = function () { addFilter(el.getAttribute("data-f")); };
+    });
+    // per-row hide / restore
+    tb.querySelectorAll("[data-hide]").forEach(function (el) {
+      el.onclick = function (e) { e.stopPropagation(); toggleHide(el.getAttribute("data-hide")); };
+    });
+    enrichIPs(); enrichFlags();
+    // tags: remove (×) and add (+tag)
+    tb.querySelectorAll("[data-untag]").forEach(function (el) {
+      el.onclick = function (e) { e.stopPropagation(); var p = el.getAttribute("data-untag").split("|"); removeTag(p[0], p.slice(1).join("|")); };
+    });
+    tb.querySelectorAll("[data-tag]").forEach(function (btn) {
+      btn.onclick = function (e) { e.stopPropagation(); openTagInput(btn); };
+    });
+    // ellipsis (collapsed multi-value) -> click copies the full list
+    tb.querySelectorAll(".ell[data-copy]").forEach(function (el) {
+      el.onclick = function (e) { e.stopPropagation(); copyText(el.getAttribute("data-copy"), el); };
+      el.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); copyText(el.getAttribute("data-copy"), el); } };
+    });
+  }
+  function copyText(txt, el) {
+    if (el) { el.classList.add("copied"); setTimeout(function () { el.classList.remove("copied"); }, 850); }  // instant feedback
+    function execCopy() { try { var ta = document.createElement("textarea"); ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand("copy"); ta.remove(); } catch (e) { } }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt).catch(execCopy); return; }
+    } catch (e) { }
+    execCopy();
+  }
+  // The row shows at most two tags and collapses the rest into "+N", so a threat with four tags had
+  // two that could not be removed from anywhere in the UI (#19568). The detail panel edits the
+  // whole set.
+  function drawerTags(d, t) {
+    var box = d.querySelector("#dwr_tags"); if (!box) return;
+    var tags = tagsOf(t.uidc);
+    var h4 = d.querySelector("#dwr_tags_h"); if (h4) h4.textContent = "tags \u00b7 " + tags.length;
+    box.innerHTML = tags.length
+      ? tags.map(function (tg) {
+          return '<span class="tag">' + esc(tg) + '<span class="tx" data-rm="' + esc(tg) + '" role="button" tabindex="0" title="remove tag">\u00d7</span></span>';
+        }).join("")
+      : '<span class="dwr-none">none</span>';
+    box.querySelectorAll("[data-rm]").forEach(function (el) {
+      el.onclick = function () { removeTag(t.uidc, el.getAttribute("data-rm")); drawerTags(d, t); };
+    });
+  }
+  function openTagInput(btn) {
+    var uid = btn.getAttribute("data-tag");
+    var inp = document.createElement("input");
+    inp.className = "taginput"; inp.maxLength = 24; inp.placeholder = "tag…";
+    btn.parentNode.replaceChild(inp, btn); inp.focus();
+    function done(commit) { if (inp._done) return; inp._done = true; if (commit && inp.value.trim()) addTag(uid, inp.value); else refresh(); }
+    inp.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); done(true); }
+      else if (e.key === "Escape") { done(false); }
+    };
+    inp.onblur = function () { done(!!inp.value.trim()); };
+  }
+  function highlightSel() {
+    var tb = document.getElementById('rows'); if (!tb) return;
+    var rows = state._pageRows || [];
+    if (state.selIdx >= rows.length) state.selIdx = rows.length - 1;
+    var rs = tb.querySelectorAll('tr');
+    for (var i = 0; i < rs.length; i++) rs[i].classList.toggle('selrow', i === state.selIdx);
+    var sel = rs[state.selIdx]; if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+  }
+  function refresh() {
+    renderChips(); renderSevFilter(); renderNewPill();
+    var _sc = document.getElementById("search_clear"); if (_sc) _sc.style.display = state.input ? "" : "none";
+    var list = viewList();
+    // Cards + open chart follow the FILTERED set (filters only ever remove, so list < all == filtered). Rebuild the
+    // aggregate from the filtered threats; skip the redraw when the filter set is unchanged (pagination / sort).
+    var _filtered = list.length !== state.all.length;
+    state.viewAgg = _filtered ? buildViewAgg(list) : state.agg;
+    var _ssig = _filtered ? ("f" + statsFilterSig()) : ("all:" + (state.agg ? state.agg.threats.length : 0));
+    if (_ssig !== state._statsSig) {
+      state._statsSig = _ssig;
+      if (state.viewAgg) renderStats(state.viewAgg);
+      if (state.chart) { var _oc = state.chart; state.chart = null; showChart(_oc); }   // redraw the open chart on the new set
+    }
+    var total = list.length, size = state.limit;
+    var pages = Math.max(1, Math.ceil(total / size));
+    if (state.page >= pages) state.page = pages - 1;
+    if (state.page < 0) state.page = 0;
+    var startIdx = state.page * size;
+    var pageRows = list.slice(startIdx, startIdx + size);
+    var cnt = document.getElementById("count");
+    var _dropped = state.agg && state.agg._dropped;
+    if (cnt) cnt.textContent = (total === state.all.length ? state.all.length + " threats"
+                                                           : total + " of " + state.all.length)
+                               + (state.streaming ? " · streaming…" : "")
+                               + (_dropped ? " · +" + fmtK(_dropped) + " ungrouped (threat limit)" : "");
+    var _tbase = "Maltrail" + (DEMO ? " (demo)" : "");
+    document.title = state.all.length ? _tbase + " \u00b7 " + (total === state.all.length ? state.all.length + " threats" : total + "/" + state.all.length) : _tbase;
+    renderHiddenInfo(cnt);
+    state._pageRows = pageRows;
+    renderRows(pageRows);
+    renderPager(total, pages, startIdx);
+    highlightSel();
+    document.querySelectorAll("thead th[data-key]").forEach(function (th) {
+      var on = th.dataset.key === state.sortKey;
+      th.classList.toggle("sort-asc", on && state.sortDir > 0);
+      th.classList.toggle("sort-desc", on && state.sortDir < 0);
+      th.setAttribute("aria-sort", on ? (state.sortDir > 0 ? "ascending" : "descending") : "none");
+    });
+    syncHash();
+  }
+  function pageSeq(cur, pages) {  // 1-based page numbers with "…" gaps around the current page + ends
+    var set = {}, out = [], prev = 0;
+    [1, 2, pages - 1, pages, cur, cur + 1, cur + 2].forEach(function (p) { if (p >= 1 && p <= pages) set[p] = 1; });
+    Object.keys(set).map(Number).sort(function (a, b) { return a - b; }).forEach(function (p) {
+      if (p - prev > 1) out.push("…"); out.push(p); prev = p;
+    });
+    return out;
+  }
+  // scroll: only when invoked from the pager buttons (which sit at the bottom of the table) — and only if the
+  // table top isn't already visible. Keyboard ←/→ paging passes scroll=false so it never yanks the viewport.
+  function gotoPage(p, scroll) {
+    state.page = p; refresh();
+    if (!scroll) return;
+    var g = document.querySelector(".grid-wrap"); if (!g) return;
+    var r = g.getBoundingClientRect();
+    if (r.top < 0 || r.top > window.innerHeight) g.scrollIntoView({ block: "start" });
+  }
+  function renderPager(total, pages, startIdx) {
+    var pg = document.getElementById("pager"); if (!pg) return;
+    if (total <= state.limit) { pg.innerHTML = ""; pg.style.display = "none"; return; }
+    pg.style.display = "";
+    var cur = state.page, end = Math.min(total, startIdx + state.limit);
+    var h = '<span class="pginfo">' + (startIdx + 1) + '–' + end + ' of ' + total + ' threats</span><span class="pgbtns">';
+    h += '<button class="pgbtn" data-pg="prev"' + (cur <= 0 ? ' disabled' : '') + ' aria-label="previous page">‹</button>';
+    pageSeq(cur + 1, pages).forEach(function (p) {
+      h += p === "…" ? '<span class="pgdots">…</span>'
+                     : '<button class="pgbtn pgnum' + (p - 1 === cur ? ' on' : '') + '" data-pg="' + (p - 1) + '">' + p + '</button>';
+    });
+    h += '<button class="pgbtn" data-pg="next"' + (cur >= pages - 1 ? ' disabled' : '') + ' aria-label="next page">›</button></span>';
+    pg.innerHTML = h;
+    pg.querySelectorAll("[data-pg]").forEach(function (b) {
+      b.onclick = function () { var v = b.getAttribute("data-pg"); gotoPage(v === "prev" ? cur - 1 : v === "next" ? cur + 1 : +v, true); };
+    });
+  }
+  // ---- IP enrichment via same-origin /check_ip (real mode only) ----
+  // /check_ip returns {ipcat: "<provider/category>", worst_asns: "true|false", drop: "true|false"}; we tag each public IP cell with a
+  // small category label + a malicious-ASN dot. Lazy + cached per IP so re-renders don't refetch.
+  var ipInfo = {};   // ip -> {cat, worst} | "pending"
+  function ipSpan(ip) {
+    var a = aliasOf(ip);
+    return '<span class="ip" data-ip="' + esc(ip) + '">' + (isPrivIP(ip) ? '<span class="lan" title="local / private network">' + LAN_ICON + '</span>' : '') + (a ? '<span class="ipcat">' + esc(a) + '</span>' : '') + esc(ip) + '</span>';
+  }
+  // a threat compacts many events -> multi-value columns collapse to an ellipsis with the full list on hover + copy
+  var PORT_NAMES = { "21": "ftp", "22": "ssh", "23": "telnet", "25": "smtp", "53": "dns", "80": "http", "110": "pop3",
+    "123": "ntp", "135": "rpc", "137": "netbios", "139": "netbios", "143": "imap", "161": "snmp", "389": "ldap",
+    "443": "https", "445": "smb", "465": "smtps", "514": "syslog", "587": "smtp", "636": "ldaps", "993": "imaps",
+    "995": "pop3s", "1080": "socks", "1433": "mssql", "1521": "oracle", "2049": "nfs", "3306": "mysql", "3389": "rdp",
+    "4444": "metasploit", "5432": "postgres", "5900": "vnc", "6379": "redis", "8080": "http-alt", "8443": "https-alt",
+    "9200": "elastic", "27017": "mongo" };
+  function portLabel(p) { return PORT_NAMES[p] ? p + " (" + PORT_NAMES[p] + ")" : p; }
+  // notable destination ports worth an eyeball in a threat alert: C2/RAT defaults + remote-access + cleartext
+  var RISKY_PORTS = { "23": "Telnet — cleartext remote access", "445": "SMB — lateral movement", "1337": "common backdoor",
+    "3389": "RDP — remote access", "4444": "Metasploit / Meterpreter default", "5900": "VNC — remote access",
+    "6666": "IRC botnet", "6667": "IRC C2", "9001": "Tor", "12345": "NetBus backdoor", "31337": "\"elite\" backdoor" };
+  function riskyPort(p) { return RISKY_PORTS[p] || ""; }
+  // render a trail: literal text stays, each REAL grouping paren collapses to the SAME ".ell" copy token
+  // used by the port/source/dest multi-value cells — one consistent "collapsed, click to copy" affordance.
+  function trailCellHtml(withPH, full) {
+    function lit(str) { return esc(str.replace(/\uE000/g, "(").replace(/\uE001/g, ")")); }
+    var re = /\([^)]*\)/g, out = "", last = 0, m;
+    while ((m = re.exec(withPH))) {
+      out += lit(withPH.slice(last, m.index));
+      out += '<span class="ell" role="button" tabindex="0" aria-label="copy full trail" data-tip="' + esc(full) + '" data-copy="' + esc(full) + '">\u2026</span>';
+      last = re.lastIndex;
+    }
+    out += lit(withPH.slice(last));
+    return out || esc(full);
+  }
+  function ellSpan(list, titleList) {
+    var copy = list.join(", "), n = list.length;
+    var title = n + (n === 1 ? " value:\n" : " values:\n") + (titleList || list).join(", ");   // count lives in the tooltip
+    return '<span class="ell" role="button" tabindex="0" aria-label="copy ' + n + (n === 1 ? ' value' : ' values') + '" data-tip="' + esc(title) + '" data-copy="' + esc(copy) + '">…</span>';
+  }
+  function ipCellSet(s) { var l = setList(s); return !l.length ? "" : l.length === 1 ? ipSpan(l[0]) : ellSpan(l); }
+  function sensorCellSet(s) { var l = setList(s); return !l.length ? "" : l.length === 1 ? '<span class="mono sensor" data-f="sensor:' + esc(l[0]) + '" title="filter: sensor ' + esc(l[0]) + '">' + esc(l[0]) + '</span>' : ellSpan(l); }
+  // Which port to SHOW/FILTER for a threat + the direction the FLAGGED traffic flowed relative to it. The chosen
+  // port is the SERVICE (triggering) side; the arrow is then FACTUAL — it just reports whether that port is the
+  // dst of the logged packet (traffic went INTO it: a request/attack → "in", arrow ←) or the src (traffic came
+  // OUT of it: a response → "out", arrow →). Service side is decided, in order of soundness:
+  //   1) an IP:port trail names the exact triggering port + endpoint -> compare its IP to src/dst (any port size)
+  //   2) a recognised well-known service port (53/80/443/8080/…) -> that side is the service
+  //   3) fallback: the lower port number is the service (ephemeral ports are high)
+  // Examples: SQL-inj request to 200:8080 -> "8080 ←"; sinkhole DNS *reply* from :53 -> "53 →"; malware-domain
+  // DNS *query* to :53 -> "53 ←"; connection to C2 bad:54321 (IPORT trail) -> "54321 ←".
+  var WELLKNOWN = { "20": 1, "21": 1, "22": 1, "23": 1, "25": 1, "53": 1, "67": 1, "68": 1, "69": 1, "80": 1, "110": 1, "123": 1, "135": 1, "137": 1, "138": 1, "139": 1, "143": 1, "161": 1, "162": 1, "389": 1, "443": 1, "445": 1, "465": 1, "514": 1, "587": 1, "636": 1, "993": 1, "995": 1, "1080": 1, "1433": 1, "1521": 1, "3128": 1, "3306": 1, "3389": 1, "5060": 1, "5432": 1, "5900": 1, "6379": 1, "6667": 1, "8000": 1, "8080": 1, "8118": 1, "8443": 1, "8888": 1, "9200": 1, "27017": 1 };
+  var EPHEMERAL_MIN = 32768;   // OS-assigned client ports live here (Linux 32768-60999, IANA 49152+); a service port is below it
+  function portInfo(t) {
+    var sp = parseInt(t.sport, 10), dp = parseInt(t.dport, 10), haveS = sp > 0, haveD = dp > 0;
+    if (!(haveS && haveD)) return { set: haveS ? t.sportS : t.dportS, dir: "" };   // one side portless (ICMP etc.)
+    var IN = { set: t.dportS, dir: "in" }, OUT = { set: t.sportS, dir: "out" };
+    // 1) IP:port trail names the exact triggering port + endpoint -> compare its IP to src/dst (exact, any port size)
+    var m = ("" + t.trail).match(/^\[?(.*?)\]?:(\d+)$/);
+    if (m) { if (m[1] === t.dst) return IN; if (m[1] === t.src) return OUT; }
+    // 1b) a bare-IP trail equal to the destination = we connected TO that bad host -> traffic INTO its port
+    //     (fixes a bad dst on a high, non-well-known port that the heuristics below can't disambiguate). Bad-SOURCE
+    //     bare-IP trails are left to the heuristics, which correctly pick our (destination) service port.
+    if (t.trail === t.dst) return IN;
+    // 2) a privileged (<1024) or registered well-known port on exactly one side is the service
+    var sSvc = sp < 1024 || WELLKNOWN[t.sport], dSvc = dp < 1024 || WELLKNOWN[t.dport];
+    if (dSvc && !sSvc) return IN;
+    if (sSvc && !dSvc) return OUT;
+    // 3) ephemeral rule: the side that is NOT a high (ephemeral) port is the service — catches services on
+    //    non-well-known mid-range ports (e.g. 8081) vs a real client ephemeral, without a lookup table
+    var sEph = sp >= EPHEMERAL_MIN, dEph = dp >= EPHEMERAL_MIN;
+    if (dEph && !sEph) return OUT;   // dst is ephemeral -> src is the service (traffic came OUT of it)
+    if (sEph && !dEph) return IN;    // src is ephemeral -> dst is the service (traffic went INTO it)
+    // 4) last resort (both/neither look like a service): lower port = service
+    return dp <= sp ? IN : OUT;
+  }
+  function displayPortSet(t) { return portInfo(t).set; }
+  function portDir(t) { return portInfo(t).dir; }
+  // Risk score for the DEFAULT ("severity" column) ordering. Severity dominates (a band each 1000 wide) so a high
+  // never sorts below a medium; WITHIN a band, active-compromise language lifts a quiet threat above loud ambient
+  // noise (a scanner hammering a port shouldn't bury one C2 beacon). Volume is a log-scaled, capped tiebreak only.
+  var RISK_HOT = /\b(c2|cnc|cobalt|beacon|trojan|ransom|sinkhole|dga|malware|infect(?:ed|ion)?|exfil|backdoor|rat|apt|stealer|botnet|loader|dropper|phish)\b/;
+  var RISK_NOISE = /\b(scan|scanner|reputation|attacker|crawler|bruteforce|brute[-\s]?force|mass|spam|probe|honeypot)\b/;
+  // Memoized, because this is called from INSIDE the sort comparator - twice per comparison. On a
+  // busy day that is ~150k calls per sort, each building a concatenated lowercased string and
+  // running two regexes over it, and "severity" is the DEFAULT column, so every page-flip, sort and
+  // keystroke paid for it. The text half (sev/type/info/trail) is written once when the threat is
+  // created and never again; only `count` moves, and only when live merges new events in - so
+  // keying the memo on count is not an approximation, it is exact, and it invalidates itself.
+  // Same arithmetic in the same order as before: identical scores, identical ordering.
+  function riskOf(t) {
+    if (t._riskN === t.count) return t._risk;
+    var s = t._riskT;
+    if (s === undefined) {
+      s = (t.sev || 1) * 1000;
+      var hay = (("" + (t.type || "")) + " " + (t.info || "") + " " + (t.trail || "")).toLowerCase();
+      if (RISK_HOT.test(hay)) s += 400;
+      if (RISK_NOISE.test(hay)) s -= 250;
+      t._riskT = s;
+    }
+    t._riskN = t.count;
+    return (t._risk = s + Math.min(90, Math.log(1 + (t.count || 1)) * 15));
+  }
+  // inline SVG arrows (not Unicode glyphs, whose vertical position is font-dependent — Firefox rendered → / ← below
+  // the text's middle). An SVG is centered by construction, so vertical-align:middle aligns it on the port text in
+  // every browser. ← = the traffic INTO this port was flagged; → = the traffic OUT of this port was flagged.
+  function _arrowSVG(paths) { return '<svg class="dir-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>'; }
+  var PORT_DIR = {
+    out: [_arrowSVG('<line x1="4" y1="12" x2="18.5" y2="12"/><polyline points="13 6.5 19 12 13 17.5"/>'), "the traffic OUT of this port was flagged (e.g. a malicious response/reply)"],
+    "in": [_arrowSVG('<line x1="20" y1="12" x2="5.5" y2="12"/><polyline points="11 6.5 5 12 11 17.5"/>'), "the traffic INTO this port was flagged (e.g. a malicious request/attack)"]
+  };
+  function portDirHint(t) { var d = portDir(t); return d ? '<span class="port-dir pd-' + d + '" data-f="dir:' + d + '" title="' + PORT_DIR[d][1] + ' — click to filter ' + d + '">' + PORT_DIR[d][0] + '</span>' : ""; }
+  // The port column shows the SERVICE side (see portInfo); the other side and the protocol are the
+  // rest of the 5-tuple and were reachable nowhere in the UI (#19569). The protocol is a column of
+  // its own below; the ports of both directions live in this cell's tooltip, where they cost no
+  // width - a threat's source ports are usually just a pile of ephemeral numbers.
+  function portCellTip(t) {
+    var sp = setList(t.sportS), dp = setList(t.dportS);
+    if (!sp.length && !dp.length) return "";
+    var lines = [];
+    if (sp.length) lines.push("source port" + (sp.length > 1 ? "s" : "") + ": " + sp.join(", "));
+    if (dp.length) lines.push("destination port" + (dp.length > 1 ? "s" : "") + ": " + dp.join(", "));
+    return ' data-tip="' + esc(lines.join("\n")) + '"';
+  }
+  function protoCellSet(s) {
+    var l = setList(s); if (!l.length) return "";
+    if (l.length === 1) return '<span class="mono proto" data-f="proto:' + esc(l[0]) + '" title="filter: proto ' + esc(l[0]) + '">' + esc(l[0]) + '</span>';
+    return ellSpan(l);
+  }
+  function portCellSet(s) {
+    var l = setList(s); if (!l.length) return "";
+    if (l.length === 1) {
+      var rk = riskyPort(l[0]);
+      return '<span class="mono port' + (rk ? ' risky" data-tip="' + esc(rk) : '') + '">' + esc(portLabel(l[0])) + '</span>';
+    }
+    var anyRisky = l.some(function (p) { return riskyPort(p); });
+    return '<span' + (anyRisky ? ' class="riskyset"' : '') + '>' + ellSpan(l, l.map(portLabel)) + '</span>';   // ell handles the tooltip
+  }
+  function isPubIP(ip) {
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return false;          // IPv4 only (dst domains live in the trail col)
+    if (/^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|22[4-9]\.|23\d\.|255\.)/.test(ip)) return false;
+    return true;
+  }
+  function applyIPInfo(ip) {
+    var info = ipInfo[ip]; if (!info || info === "pending") return;
+    var sel = document.querySelectorAll('#rows .ip[data-ip="' + cssEsc(ip) + '"]');
+    for (var i = 0; i < sel.length; i++) {
+      var c = sel[i]; if (c._enriched) continue; c._enriched = true;
+      if (info.cat && !c.querySelector(".ipcat")) { var s = document.createElement("span"); s.className = "ipcat"; s.textContent = info.cat; c.insertBefore(s, c.firstChild); }
+      if (info.worst) { var w = document.createElement("span"); w.className = "worstasn"; w.title = "malicious ASN"; c.appendChild(w); }
+      // A second, independent verdict: Spamhaus lists the NETBLOCK, worst_asns the ASN. Two dots
+      // rather than one merged badge, so an address in both shows both (#19598).
+      if (info.drop) { var d = document.createElement("span"); d.className = "droplist"; d.title = "rogue network (Spamhaus)"; c.appendChild(d); }
+    }
+  }
+  function enrichIPs() {
+    if (DEMO) return;
+    var cells = document.querySelectorAll("#rows .ip[data-ip]"), want = {};
+    for (var i = 0; i < cells.length; i++) { var ip = cells[i].getAttribute("data-ip"); if (isPubIP(ip)) want[ip] = 1; }
+    Object.keys(want).forEach(function (ip) {
+      if (ipInfo[ip] !== undefined) { applyIPInfo(ip); return; }
+      ipInfo[ip] = "pending";
+      fetch("/check_ip?address=" + encodeURIComponent(ip), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          ipInfo[ip] = j ? { cat: (j.ipcat || ""), worst: j.worst_asns === "true", drop: j.drop === "true" } : { cat: "", worst: false, drop: false };
+          // offline GeoIP fallback: if RIPE hasn't supplied a country (air-gapped -> /ripe answers 204), use the
+          // country from our local RIR table so the flag still shows. /check_ip needs no internet at all.
+          if (j && j.country && !(ripe[ip] && ripe[ip].cc)) { ripe[ip] = ripe[ip] || { t: +new Date() }; ripe[ip].cc = j.country.toLowerCase(); applyRipe(ip); }
+          applyIPInfo(ip); refreshTipFor(ip);
+        })
+        .catch(function () { ipInfo[ip] = { cat: "", worst: false, drop: false }; });
+    });
+  }
+
+  // ---- RIPE geolocation + ASN enrichment: country flags + hover tooltip (like the legacy UI) ----
+  // Queried through the server's /ripe endpoint (same-origin fetch), NOT from the browser. This used to inject a
+  // JSONP <script> per IP at stat.ripe.net, which is why the shipped CSP had to allow script-src from that origin --
+  // third-party code executing in the page that shows the alerts, for a flag and a tooltip. The server proxies and
+  // caches the lookup instead, so script-src is 'self' again. Air-gapped installs: /ripe answers 204 -> no flag,
+  // everything else keeps working. Results still cached in localStorage for 7 days, so a reload asks for nothing.
+  var RIPE_TTL = 7 * 864e5;
+  var ripe = (function () {
+    var o = lsGet("mt_ripe", {}); if (!o || typeof o !== "object") return {};
+    var now = +new Date(), out = {};
+    for (var k in o) if (o[k] && o[k].t && (now - o[k].t) < RIPE_TTL) out[k] = o[k];
+    return out;
+  })();
+  function saveRipe() { lsSet("mt_ripe", ripe); }
+  function flagEmoji(cc) {   // 2-letter country code -> regional-indicator emoji (zero assets, offline-friendly)
+    if (!cc || !/^[a-z]{2}$/i.test(cc)) return "";
+    cc = cc.toUpperCase();
+    return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65) + String.fromCodePoint(0x1F1E6 + cc.charCodeAt(1) - 65);
+  }
+  var _regionNames;
+  function countryName(cc) {
+    if (!cc) return "";
+    try {
+      if (_regionNames === undefined) _regionNames = (typeof Intl !== "undefined" && Intl.DisplayNames) ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+      if (_regionNames) return _regionNames.of(cc.toUpperCase()) || cc.toUpperCase();
+    } catch (e) {}
+    return cc.toUpperCase();
+  }
+  // capped queue: a dense page can want hundreds of distinct IPs, and firing every lookup at once is a request storm
+  // against our own server (which then serialises them at RIPEstat anyway). Queue + run RIPE_MAX at a time.
+  var _ripeQ = [], _ripeActive = 0, RIPE_MAX = 6;
+  // Air-gap circuit breaker: /ripe answers 204 when the server cannot reach RIPEstat (or when the operator set
+  // DISABLE_RIPE_LOOKUPS), and failures are NOT cached client-side (only country codes are) -> without this, every
+  // reload would re-ask for every visible IP. After a few consecutive non-answers we conclude "no enrichment here"
+  // and stop asking for the session; a single success resets it. The server keeps its own short negative cache, so
+  // even the requests we do make are cheap.
+  var _ripeFails = 0, _ripeDead = false, RIPE_FAIL_LIMIT = 3;
+  function ripeQuery(kind, ip, cb) { if (_ripeDead) { try { cb(null); } catch (e) {} return; } _ripeQ.push([kind, ip, cb]); _ripePump(); }
+  function _ripePump() { while (!_ripeDead && _ripeActive < RIPE_MAX && _ripeQ.length) { var it = _ripeQ.shift(); _ripeActive++; _ripeRun(it[0], it[1], it[2]); } }
+  function _ripeRun(kind, ip, cb) {
+    var done = false;
+    function finish(data) {
+      if (done) return; done = true;
+      if (data) _ripeFails = 0;                                                        // success -> reset the breaker
+      else if (++_ripeFails >= RIPE_FAIL_LIMIT) { _ripeDead = true; _ripeQ.length = 0; }   // give up for this session
+      try { cb(data); } catch (e) {}
+      _ripeActive--; _ripePump();
+    }
+    var to = setTimeout(function () { finish(null); }, 8000);   // a hung lookup must not stall the queue
+    fetch("/ripe?kind=" + encodeURIComponent(kind) + "&address=" + encodeURIComponent(ip), { credentials: "same-origin" })
+      .then(function (r) { return (r.ok && r.status !== 204) ? r.json() : null; })      // 204 = server could not answer
+      .then(function (j) { clearTimeout(to); finish(j); })
+      .catch(function () { clearTimeout(to); finish(null); });
+  }
+  // Real countries for the demo's addresses, generated by sensor/tools/gen_demo_js.py from the same
+  // RIR tables the server geolocates with. This replaced hashing the address into a 20-country list,
+  // which published 8.8.8.8 as Sweden and 8.8.4.4 as Iran. An address absent from the table has no
+  // country - RFC 1918 and RFC 5737 space belongs to nowhere - and gets no flag rather than a made-up one.
+  var DEMO_GEO = (function () { try { return (typeof window.getDemoGeo === "function") ? window.getDemoGeo() : {}; } catch (e) { return {}; } })();
+  var _geoInflight = {}, _asnInflight = {};
+  // proactive: country flag only (1 request per IP, cached). Demo fabricates so flags show offline/in the artifact.
+  function ripeGeo(ip) {
+    var r = ripe[ip]; if (r && r.cc != null) { applyRipe(ip); return; }
+    if (_geoInflight[ip]) return; _geoInflight[ip] = 1;
+    if (DEMO) { ripe[ip] = ripe[ip] || { t: +new Date() }; ripe[ip].cc = DEMO_GEO[ip] || ""; applyRipe(ip); refreshTipFor(ip); return; }
+    ripeQuery("geo", ip, function (j) {   // /ripe does the RIPEstat call and the parsing; "" when it could not
+      var cc = ""; try { cc = (j.cc || "").toLowerCase(); } catch (e) {}
+      ripe[ip] = ripe[ip] || {}; ripe[ip].cc = cc; ripe[ip].t = +new Date(); saveRipe(); applyRipe(ip); refreshTipFor(ip);
+    });
+  }
+  // lazy: ASN + holder, fetched only when a tooltip opens for the IP (cached)
+  function ripeAsn(ip) {
+    var r = ripe[ip]; if (r && r.asn != null) return;
+    if (_asnInflight[ip]) return; _asnInflight[ip] = 1;
+    if (DEMO) return;   // no ASN table ships with the demo, and inventing one for a real address is how 8.8.8.8 ended up Swedish
+    ripeQuery("asn", ip, function (j) {
+      var asn = "", holder = ""; try { asn = j.asn || ""; holder = j.holder || ""; } catch (e) {}
+      ripe[ip] = ripe[ip] || {}; ripe[ip].asn = asn; if (holder) ripe[ip].holder = holder; ripe[ip].t = +new Date(); saveRipe(); refreshTipFor(ip); applyRipe(ip);
+    });
+  }
+  function applyRipe(ip) {
+    var rec = ripe[ip]; if (!rec || !rec.cc) return;
+    var fe = flagEmoji(rec.cc); if (!fe) return;
+    var cn = countryName(rec.cc);
+    var sel = document.querySelectorAll('#rows .ip[data-ip="' + cssEsc(ip) + '"], #drawer .dchip[data-ip="' + cssEsc(ip) + '"]');
+    for (var i = 0; i < sel.length; i++) {
+      var c = sel[i], isChip = c.className.indexOf("dchip") >= 0;
+      if (isChip) c.title = cn + (rec.asn ? " · " + rec.asn + (rec.holder ? " " + rec.holder : "") : "");   // drawer chip: flag + country/ASN tooltip
+      if (c.querySelector(".flag")) continue;
+      var f = document.createElement("span"); f.className = "flag"; f.textContent = fe;   // country shown in the styled tooltip; no native title (would overlap it)
+      c.insertBefore(f, c.firstChild);
+    }
+  }
+  function enrichFlags() {   // fire RIPE lookups for visible public IPs (both modes; demo fabricates)
+    var cells = document.querySelectorAll("#rows .ip[data-ip]"), want = {};
+    for (var i = 0; i < cells.length; i++) { var ip = cells[i].getAttribute("data-ip"); if (isPubIP(ip)) want[ip] = 1; }
+    Object.keys(want).forEach(function (ip) { applyRipe(ip); ripeGeo(ip); });
+  }
+  function enrichDrawerIPs() {   // flags + country/ASN tooltip on the drawer's source/dest chips
+    var cells = document.querySelectorAll("#drawer .dchip[data-ip]"), want = {};
+    for (var i = 0; i < cells.length; i++) { var ip = cells[i].getAttribute("data-ip"); if (isPubIP(ip)) want[ip] = 1; }
+    Object.keys(want).forEach(function (ip) { applyRipe(ip); ripeGeo(ip); ripeAsn(ip); });
+  }
+
+  // ---- hover tooltip for IP cells: flag + country + ASN/holder + category ----
+  var _tipEl, _tipIP = null;
+  function tipEl() { if (!_tipEl) { _tipEl = document.createElement("div"); _tipEl.className = "hovertip"; _tipEl.style.display = "none"; document.body.appendChild(_tipEl); } return _tipEl; }
+  function hideTip() { if (_tipEl) _tipEl.style.display = "none"; _tipIP = null; }
+  function ctxIsOpen() { var m = document.getElementById("ctxmenu"); return !!(m && m.style.display === "block"); }
+  // Anchor the tip to the hovered CELL. The accessibility A-/A+ control sets CSS `zoom` on <html>, and how that
+  // zoom maps a fixed element's style left/top to painted pixels (vs what getBoundingClientRect reports) differs
+  // across engines -> the tip used to drift far off at any zoom != 1. So don't assume: MEASURE the style->paint
+  // mapping with two probes (paint = a + style*s, where s is effectively the zoom), then solve for the style that
+  // lands the tip at the cell. Engine-agnostic, correct at any zoom.
+  // Position a body-appended popup so its top-left PAINTS at visual (vx,vy). The accessibility A-/A+ control
+  // sets CSS `zoom` on <html>; how that offsets a fixed/absolute element vs what getBoundingClientRect reports
+  // differs across engines, so we MEASURE the style->paint mapping (paint = a + style*s) and invert it rather
+  // than assume. Returns put() for re-placement (viewport clamping against the element's measured rect).
+  function _fixedPlacer(el) {
+    el.style.left = "0px"; el.style.top = "0px";
+    var a = el.getBoundingClientRect();
+    el.style.left = "200px"; el.style.top = "200px";
+    var b = el.getBoundingClientRect();
+    var sx = (b.left - a.left) / 200 || 1, sy = (b.top - a.top) / 200 || 1;
+    return function (vx, vy) { el.style.left = Math.round((vx - a.left) / sx) + "px"; el.style.top = Math.round((vy - a.top) / sy) + "px"; };
+  }
+  // drop a body-appended menu below a button (left-aligned), zoom-safe, kept inside the viewport
+  function _placeBelow(m, btn, gap) {
+    var r = btn.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight, put = _fixedPlacer(m);
+    gap = gap || 4;
+    put(r.left, r.bottom + gap);
+    var f = m.getBoundingClientRect();
+    if (f.right > vw - 6) put(Math.max(6, vw - 6 - f.width), r.bottom + gap);
+    f = m.getBoundingClientRect(); if (f.bottom > vh - 6) put(f.left, Math.max(6, r.top - gap - f.height));   // lift above the button
+  }
+  function placeTipAt(el) {
+    if (!el) return;
+    var t = tipEl(), cr = el.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+    var put = _fixedPlacer(t);
+    put(cr.left, cr.bottom + 6);                             // desired: just below the cell, left-aligned
+    var f = t.getBoundingClientRect();                       // clamp against the tip's MEASURED rect (all visual coords)
+    if (f.right > vw - 6) put(Math.max(6, vw - 6 - f.width), cr.bottom + 6);
+    f = t.getBoundingClientRect(); if (f.left < 6) put(6, cr.bottom + 6);
+    f = t.getBoundingClientRect(); if (f.bottom > vh - 6) put(f.left, Math.max(6, cr.top - 6 - f.height));   // flip above the cell
+  }
+  function ipTipHTML(ip) {
+    var rec = ripe[ip], ci = ipInfo[ip], a = IP_ALIASES[ip], pub = isPubIP(ip), L = [];
+    var geo = (rec && rec.cc) ? '<span class="tt-flag">' + flagEmoji(rec.cc) + "</span>" + esc(countryName(rec.cc))
+            : ((pub && !DEMO) ? '<span class="tt-dim">locating…</span>' : "");
+    L.push('<div class="tt-ip">' + esc(ip) + (geo ? ' <span class="tt-geo">' + geo + "</span>" : "") + "</div>");
+    if (a) L.push('<div class="tt-row"><span>alias</span>' + esc(a) + "</div>");
+    if (rec && rec.asn) L.push('<div class="tt-row"><span>ASN</span>' + esc(rec.asn) + (rec.holder ? " · " + esc(rec.holder) : "") + "</div>");
+    if (ci && ci !== "pending" && ci.cat) L.push('<div class="tt-row"><span>category</span>' + esc(ci.cat) + "</div>");
+    if (ci && ci !== "pending" && ci.worst) L.push('<div class="tt-row tt-warn">⚠ malicious ASN</div>');
+    if (ci && ci !== "pending" && ci.drop) L.push('<div class="tt-row tt-warn">⚠ rogue network (Spamhaus)</div>');
+    if (!pub) L.push('<div class="tt-row tt-dim">private / LAN address — no geolocation</div>');
+    return L.join("");
+  }
+  function refreshTipFor(ip) { if (_tipIP === ip && _tipEl && _tipEl.style.display !== "none") _tipEl.innerHTML = ipTipHTML(ip); }
+  // styled tooltip for the collapsed "…" cells (same look as the IP tooltip, not the native browser hint)
+  function ellTipHTML(text) {
+    var parts = ("" + text).split("\n");
+    if (parts.length > 1) {   // ellSpan form: "N values:\nv, v, v" -> header + value list
+      var vals = parts.slice(1).join("\n").split(", ");
+      return '<div class="tt-ip">' + esc(parts[0]) + '</div><div class="tt-vals">' + vals.map(function (v) { return esc(v); }).join("<br>") + "</div>";
+    }
+    return '<div class="tt-vals">' + esc(text) + "</div>";   // single value (trail/info/etc.) — just the value, no header
+  }
+  function renderHiddenInfo(cnt) {
+    var hc = 0; for (var k in state.hidden) hc++;
+    var wc = wlCount();
+    var hi = document.getElementById("hiddeninfo");
+    if (!hi && cnt && cnt.parentNode) {
+      hi = document.createElement("span"); hi.id = "hiddeninfo"; hi.className = "hiddeninfo";
+      cnt.parentNode.insertBefore(hi, cnt.nextSibling);
+    }
+    if (!hi) return;
+    if (!hc && !wc) { hi.style.display = "none"; hi.innerHTML = ""; return; }
+    hi.style.display = "";
+    var parts = [];
+    if (hc) parts.push(hc + ' hidden · <a href="#" data-act="toggle">' + (state.showHidden ? "conceal" : "reveal") + '</a> · <a href="#" data-act="clear">clear</a>');
+    if (wc) parts.push(wc + ' whitelisted · <a href="#" data-act="wl">manage</a>');
+    hi.innerHTML = '· ' + parts.join(' · ');
+    var _tg = hi.querySelector('[data-act="toggle"]'); if (_tg) _tg.onclick = function (e) { e.preventDefault(); state.showHidden = !state.showHidden; refresh(); };
+    var _cl = hi.querySelector('[data-act="clear"]'); if (_cl) _cl.onclick = function (e) { e.preventDefault(); unhideAll(); };
+    var _wm = hi.querySelector('[data-act="wl"]'); if (_wm) _wm.onclick = function (e) { e.preventDefault(); showWLManage(); };
+  }
+  function addFilter(tok) {
+    tok = ("" + tok).toLowerCase();
+    if (tok && state.filters.indexOf(tok) < 0) { state.filters.push(tok); state.page = 0; refresh(); }
+  }
+  // ---- light / dark theme (persisted) ----
+  function getTheme() { try { return localStorage.getItem("mt_theme") || "dark"; } catch (e) { return "dark"; } }
+  function applyTheme(t) {
+    document.body.classList.toggle("light", t === "light");
+    var b = document.getElementById("theme_toggle"); if (b) b.textContent = t === "light" ? "☀" : "☾";
+  }
+  function setTheme(t) {
+    try { localStorage.setItem("mt_theme", t); } catch (e) { }
+    applyTheme(t);
+    // canvases bake in theme colors at draw time -> redraw the stat minis + any open chart so they match the new theme
+    if (state.agg) { renderStats(state.viewAgg || state.agg); var oc = state.chart; if (oc) { state.chart = null; showChart(oc); } }
+  }
+  // ---- text size (accessibility): zoom the whole UI in discrete steps, persisted ----
+  var FZ_STEPS = [0.9, 1, 1.1, 1.25, 1.4];
+  function getScaleIdx() { var v = parseInt((function () { try { return localStorage.getItem("mt_scale"); } catch (e) { return null; } })(), 10); return (v >= 0 && v < FZ_STEPS.length) ? v : 1; }
+  function applyScale(idx) { document.documentElement.style.zoom = FZ_STEPS[idx]; }
+  function setScale(idx) { idx = Math.max(0, Math.min(FZ_STEPS.length - 1, idx)); try { localStorage.setItem("mt_scale", idx); } catch (e) { } applyScale(idx); }
+  // ONE block above the table holds either the dashboard (cards + drill-down charts) OR the attack map. Two separate,
+  // one-click intents: the VIEW toggle flips dashboard <-> map (mutually exclusive, always one of them), and the
+  // COLLAPSE chevron hides/shows the whole block (full-height table when hidden). Persisted: mt_panel + mt_collapsed.
+  function getView() { try { return localStorage.getItem("mt_panel") === "map" ? "map" : "dash"; } catch (e) { return "dash"; } }
+  function getCollapsed() {
+    try {
+      var c = localStorage.getItem("mt_collapsed");
+      if (c === "0" || c === "1") return c === "1";
+      return localStorage.getItem("mt_cards") === "1";   // migrate the old "hide dashboard" flag
+    } catch (e) { return false; }
+  }
+  function applyView() {
+    var view = getView(), collapsed = getCollapsed();
+    var dashShown = !collapsed && view === "dash", mapShown = !collapsed && view === "map";
+    document.body.classList.toggle("cards-collapsed", !dashShown);   // hides .stats + #chart_area unless the dashboard is the shown view
+    var wm = document.getElementById("worldmap"); if (wm) wm.hidden = !mapShown;   // .worldmap[hidden] actually hides it
+    var vt = document.getElementById("view_toggle");
+    if (vt) {
+      var icD = vt.querySelector(".ic-dash"), icM = vt.querySelector(".ic-map"), toMap = (view !== "map");   // icon = the view you'll switch TO
+      if (icD) icD.style.display = toMap ? "none" : "block";
+      if (icM) icM.style.display = toMap ? "block" : "none";
+      vt.title = toMap ? "show attack map" : "show dashboard"; vt.setAttribute("aria-label", vt.title);
+    }
+    var ct = document.getElementById("collapse_toggle");
+    if (ct) { ct.setAttribute("aria-expanded", collapsed ? "false" : "true"); ct.title = collapsed ? "show panel" : "hide panel"; ct.setAttribute("aria-label", ct.title); }
+    if (mapShown) renderWorldMap();
+  }
+  function setView(v) { try { localStorage.setItem("mt_panel", v); } catch (e) { } }
+  function setCollapsed(c) { try { localStorage.setItem("mt_collapsed", c ? "1" : "0"); } catch (e) { } }
+  function toggleView() { setView(getView() === "map" ? "dash" : "map"); setCollapsed(false); applyView(); }   // switching view always shows it
+  function toggleCollapsed() { setCollapsed(!getCollapsed()); applyView(); }
+
+  // ---- attack-origin world map (fed by /geo: trail IPs only, so mapped/unmapped is honest) ----
+  var WM_BASE = ["#ffd24c", "#ffab2e", "#fd7a1e", "#f0431f", "#d1102e"];   // 5-step warm heat, few -> many (theme-independent, like the calendar)
+  function wmBucket(n) { return !n ? 0 : n < 50 ? 1 : n < 500 ? 2 : n < 5000 ? 3 : n < 50000 ? 4 : 5; }
+  function wmColor(n) { return WM_BASE[Math.max(0, wmBucket(n) - 1)]; }
+  var _wmBuilt = false, _wmReqDate = null;
+  function buildWmShell() {
+    var host = document.getElementById("worldmap"); if (!host || _wmBuilt) return;
+    host.innerHTML =
+      '<div class="wm-map"><div class="wm-hd">Attack origins <small class="wm-sub"></small></div>' + (window.WORLD_SVG || "") +
+      '<div class="wm-leg"><span>events</span><i style="width:5px;height:5px"></i><i style="width:9px;height:9px"></i><i style="width:14px;height:14px"></i></div></div>' +
+      '<div class="wm-side"><h4>Threat countries</h4><div class="wm-list"></div></div>';
+    var svg = host.querySelector("#wm");
+    if (svg) svg.insertAdjacentHTML("afterbegin", '<defs><filter id="wmglow" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="3.2"/></filter></defs>');
+    _wmBuilt = true;
+  }
+  function paintWm(data) {
+    var host = document.getElementById("worldmap"); if (!host) return;
+    var svg = host.querySelector("#wm"), C = window.WORLD_CENT || {}, counts = (data && data.counts) || {};
+    var items = Object.keys(counts).filter(function (cc) { return C[cc]; }).map(function (cc) { return [cc, counts[cc]]; });
+    items.sort(function (a, b) { return a[1] - b[1]; });   // small first so the big/hot dots paint on top
+    if (svg) {
+      var halos = "", cores = "", arcs = "", home = "";
+      items.forEach(function (it) {
+        var xy = C[it[0]], b = wmBucket(it[1]), r = 3 + b * 2, col = WM_BASE[Math.max(0, b - 1)];
+        halos += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="' + (r * 1.8).toFixed(1) + '" fill="' + col + '"/>';
+        cores += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="' + r + '" fill="' + col + '" stroke="#fff" stroke-opacity=".4" stroke-width=".6"><title>' + esc(it[0]) + ': ≈ ' + fmtN(it[1]) + ' events</title></circle>';
+      });
+      var hm = data && data.home;   // arcs + home only when HOME_LAT/LON is configured (air-gap can't auto-locate)
+      if (hm && window.WORLD_LL2XY) {
+        var hp = window.WORLD_LL2XY(hm.lon, hm.lat), hx = +hp[0].toFixed(1), hy = +hp[1].toFixed(1);
+        items.forEach(function (it) {
+          var xy = C[it[0]], mx = ((xy[0] + hx) / 2).toFixed(1), my = ((xy[1] + hy) / 2 - Math.hypot(hx - xy[0], hy - xy[1]) * 0.32).toFixed(1);
+          arcs += '<path class="wm-arc" d="M' + xy[0] + ' ' + xy[1] + ' Q' + mx + ' ' + my + ' ' + hx + ' ' + hy + '" stroke-width="1" stroke-opacity=".5" stroke-linecap="round" stroke-dasharray="2 8"><animate attributeName="stroke-dashoffset" values="30;0" dur="1.4s" repeatCount="indefinite"/></path>';
+        });
+        home = '<g><circle cx="' + hx + '" cy="' + hy + '" r="4" fill="none" stroke="#34d399" stroke-width="1.4"><animate attributeName="r" values="4;13" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".8;0" dur="2.2s" repeatCount="indefinite"/></circle><circle cx="' + hx + '" cy="' + hy + '" r="3.4" fill="#eafff5" stroke="#34d399" stroke-width="1.3"><title>Your network</title></circle></g>';
+      }
+      var olds = svg.querySelectorAll(".wm-dotlayer"); for (var i = 0; i < olds.length; i++) olds[i].parentNode.removeChild(olds[i]);
+      svg.insertAdjacentHTML("beforeend", '<g class="wm-dotlayer">' + arcs + '</g><g class="wm-dotlayer" filter="url(#wmglow)" opacity=".5">' + halos + '</g><g class="wm-dotlayer">' + cores + home + '</g>');
+    }
+    // list every country that's on the map (sorted desc), not an arbitrary top-8 — the panel scrolls if they overflow
+    var top = items.slice().sort(function (a, b) { return b[1] - a[1]; }).slice(0, 100), max = top.length ? top[0][1] : 1;
+    var list = host.querySelector(".wm-list");
+    if (list) list.innerHTML = top.length
+      ? top.map(function (it) { return '<div class="wm-row"><span class="wm-cc">' + esc(it[0]) + '</span><span class="wm-bar" style="width:' + (10 + Math.round(86 * it[1] / max)) + '%;background:' + wmColor(it[1]) + '"></span><span class="wm-vn">' + fmtN(it[1]) + '</span></div>'; }).join("")
+      : '<div class="wm-empty">No geolocatable sources for this day.</div>';
+    var sub = host.querySelector(".wm-sub");
+    if (sub) sub.textContent = "· " + fmtN((data && data.mapped) || 0) + " mapped · " + fmtN((data && data.unmapped) || 0) + " local/unmapped";
+  }
+  function demoCC(ip) { var cc = DEMO_GEO[ip]; return cc ? cc.toUpperCase() : ""; }   // same real table as the flags -> map matches
+  function demoGeo() {
+    // build the showcase map from the demo events, geolocated with the SAME fabrication as the flags, so the map's
+    // countries line up with the table's flags. a demo "home" is set so the arcs are visible in the public demo.
+    //
+    // Which end to plot is core/geo.py:event_country's decision, and this mirrors it rather than inventing a
+    // second rule. Plotting the SOURCE - what this did before - is only right for an inbound attack; it appeared
+    // to work merely because the demo capture was taken ISP-side, where the monitored hosts were themselves
+    // public. On any normal capture every source is private and the map came out empty.
+    var counts = {}, mapped = 0, unmapped = 0, d = state.agg;
+    function firstPub(list) { for (var k = 0; k < list.length; k++) { if (isPubIP(list[k])) return list[k]; } return ""; }
+    if (d && d.threats) for (var i = 0; i < d.threats.length; i++) {
+      var t = d.threats[i], ip = "";
+      var m = /^(\d{1,3}(?:\.\d{1,3}){3})(?:[:/]|$)/.exec(normTrail(t.trail) || "");
+      if (m && isPubIP(m[1])) ip = m[1];                              // 1. the IOC itself is the malicious endpoint
+      else if (t.type === "DNS") ip = "";                             // 2. the dst is only the resolver -> honestly unmapped
+      else if (t.type === "PATH" || t.type === "PORT") ip = firstPub(setList(t.srcS)) || firstPub(setList(t.dstS));   // 3. inbound
+      else ip = firstPub(setList(t.dstS)) || firstPub(setList(t.srcS));                                               // 4. outbound
+      var cc = ip ? demoCC(ip) : "";
+      if (cc) { counts[cc] = (counts[cc] || 0) + t.count; mapped += t.count; } else { unmapped += t.count; }
+    }
+    return { counts: counts, mapped: mapped, unmapped: unmapped, home: { lat: 45.815, lon: 15.9819 } };
+  }
+  function renderWorldMap() {
+    buildWmShell();
+    var date = currentDate(); _wmReqDate = date;
+    if (DEMO) { paintWm(demoGeo()); return; }   // static build has no server -> fabricate from the demo events
+    fetch("/geo?date=" + encodeURIComponent(date), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (o) { if (_wmReqDate === date) paintWm(o || { counts: {}, mapped: 0, unmapped: 0 }); })
+      .catch(function () { if (_wmReqDate === date) paintWm({ counts: {}, mapped: 0, unmapped: 0 }); });
+  }
+  // Keep the map current on live/new data like the dashboard does. /geo is incremental server-side (only new bytes
+  // scanned), so a light 2s throttle gives a near-real-time feel without a fetch per SSE batch. No-op unless shown.
+  var _wmLast = 0, _wmTimer = null;
+  function scheduleMapRefresh() {
+    if (getView() !== "map" || getCollapsed()) return;
+    var wait = 2000, now = +new Date(), since = now - _wmLast;
+    if (since >= wait) { _wmLast = now; renderWorldMap(); }
+    else if (!_wmTimer) _wmTimer = setTimeout(function () { _wmTimer = null; _wmLast = +new Date(); renderWorldMap(); }, wait - since);
+  }
+  // ---- mute the live new-threat beep (persisted) ----
+  var _VOL_ON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>';
+  var _VOL_OFF = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>';
+  function getMuted() { try { return localStorage.getItem("mt_mute") === "1"; } catch (e) { return false; } }
+  function applyMuted(m) {
+    var b = document.getElementById("mute_btn");
+    if (b) { b.innerHTML = m ? _VOL_OFF : _VOL_ON; b.setAttribute("aria-pressed", m ? "true" : "false"); var lbl = (m ? "unmute" : "mute") + " new-threat beeps"; b.title = lbl; b.setAttribute("aria-label", lbl); }
+  }
+  function setMuted(m) { try { localStorage.setItem("mt_mute", m ? "1" : "0"); } catch (e) { } applyMuted(m); }
+  function wire() {
+    var _rows = document.getElementById('rows');
+    if (_rows) _rows.addEventListener('contextmenu', function (e) {
+      var tr = e.target.closest ? e.target.closest('tr') : null; if (!tr || tr.dataset.ri == null) return;
+      var t = (state._pageRows || [])[+tr.dataset.ri]; if (!t) return;
+      e.preventDefault(); hideTip(); openCtx(t, e.clientX, e.clientY);
+    });
+    document.addEventListener('click', function () { closeCtx(); closeDatePicker(); });   // datepop stops propagation on internal clicks, so this only fires for outside clicks
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeCtx(); closeDrawer(); closeDatePicker(); } });
+    window.addEventListener('scroll', function () { closeCtx(); closeDatePicker(); }, true);
+    window.addEventListener('resize', function () { if (state._dpOpen) positionDatePop(); });
+    if (_rows) _rows.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('button, a, input, .ell, [data-f], [data-untag], .tx, .rowhide, .tagadd')) return;
+      var tr = e.target.closest ? e.target.closest('tr') : null; if (!tr || tr.dataset.ri == null) return;
+      var t = (state._pageRows || [])[+tr.dataset.ri]; if (t) openDrawer(t);
+    });
+    // hover an IP cell -> flag + country + ASN/holder + category tooltip (RIPE-enriched, lazy)
+    if (_rows) {
+      // ONE styled tooltip for all in-row hover info: IP cells (flag/country/ASN) + any [data-tip] (trail/info/ports/first-seen).
+      // .ip wins over an ancestor [data-tip] so nested content shows the richer IP card, never a doubled native hint.
+      var hoverSel = '.ip[data-ip], [data-tip]';
+      _rows.addEventListener('mouseover', function (e) {
+        if (!e.target.closest || ctxIsOpen()) return;   // don't stack a tooltip under an open right-click menu
+        var ipc = e.target.closest('.ip[data-ip]'), tc = e.target.closest('[data-tip]');
+        var t = tipEl();
+        var anchor = null;
+        if (ipc && (!tc || ipc.contains(tc))) { var ip = ipc.getAttribute('data-ip'); _tipIP = ip; if (isPubIP(ip)) { ripeGeo(ip); ripeAsn(ip); } t.innerHTML = ipTipHTML(ip); anchor = ipc; }
+        else if (tc) { _tipIP = null; t.innerHTML = ellTipHTML(tc.getAttribute('data-tip')); anchor = tc; }
+        else return;
+        t.style.display = 'block'; placeTipAt(anchor);
+      });
+      _rows.addEventListener('mousemove', function () {
+        if (ctxIsOpen()) hideTip();   // tip is cell-anchored, so no per-move repositioning; just clear it under an open menu
+      });
+      _rows.addEventListener('mouseout', function (e) {
+        var to = e.relatedTarget;
+        if (!(to && to.closest && to.closest(hoverSel))) hideTip();
+      });
+    }
+    var _scrim = document.getElementById('drawer_scrim'); if (_scrim) _scrim.addEventListener('click', closeDrawer);
+    var _exp = document.getElementById('export_btn'); if (_exp) _exp.onclick = function (e) { e.stopPropagation(); openExportMenu(_exp); };
+    var _vw = document.getElementById('views_btn'); if (_vw) _vw.onclick = function (e) { e.stopPropagation(); openViewsMenu(_vw); };
+    var _lv = document.getElementById('live_btn'); if (_lv) _lv.onclick = function (e) {
+      e.stopPropagation(); setLive(!state.live); lsSet("mt_live", state.live);   // the click is the preference; going offline is not
+      try { if (state.live && "Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e2) { }   // needs a gesture
+    };
+    var _mt = document.getElementById('mute_btn'); if (_mt) _mt.onclick = function (e) { e.stopPropagation(); setMuted(!getMuted()); };
+    var _qh = document.getElementById('qhelp'); if (_qh) _qh.onclick = function (e) { e.stopPropagation(); openQueryHelp(_qh); };
+    var _hb = document.getElementById('hunt_btn'); if (_hb) _hb.onclick = function (e) { e.stopPropagation(); openHunt(); };
+    var _nm = document.getElementById('nav_menu'); if (_nm) _nm.onclick = function (e) { e.stopPropagation(); if (_nm.getAttribute('aria-expanded') === 'true') closeCtx(); else openNavMenu(_nm); };
+    var tt = document.getElementById("theme_toggle");
+    if (tt) tt.onclick = function () { setTheme(getTheme() === "light" ? "dark" : "light"); };
+    var _fzd = document.getElementById("fz_dec"); if (_fzd) _fzd.onclick = function () { setScale(getScaleIdx() - 1); };
+    var _fzi = document.getElementById("fz_inc"); if (_fzi) _fzi.onclick = function () { setScale(getScaleIdx() + 1); };
+    var _vt = document.getElementById("view_toggle"); if (_vt) _vt.onclick = toggleView;        // flip dashboard <-> attack map
+    var _ct = document.getElementById("collapse_toggle"); if (_ct) _ct.onclick = toggleCollapsed;  // hide/show the whole block
+    var f = document.getElementById("filter");
+    if (f) {
+      // Search re-filters every threat, so on a busy day one keystroke can block the main thread
+      // for ~80ms - longer than the gap between keystrokes, which leaves the browser busy for most
+      // of the time you are typing a word. So coalesce, but only when there is something to
+      // coalesce: while a refresh is cheap (a quiet day, a narrow filter - the common case) it
+      // still runs on the keystroke and search stays instant. The delay is only paid once the
+      // alternative is a UI that stutters for the whole word.
+      var _searchT = null, _lastRefreshMs = 0, _lastInput = 0;
+      var searchRefresh = function () {
+        _searchT = null;
+        var t0 = _now();
+        refresh();
+        _lastRefreshMs = _now() - t0;
+      };
+      f.oninput = function () {
+        state.input = f.value; state.page = 0;
+        if (_searchT) { clearTimeout(_searchT); _searchT = null; }
+        var now = _now(), typing = (now - _lastInput) < 250;   // still mid-word, vs. paused for an answer
+        _lastInput = now;
+        // Refresh immediately unless BOTH are true: the user is still typing, and a refresh is
+        // expensive enough that doing it per keystroke would block the main thread for most of the
+        // word. A single edit, or the first keystroke after a pause, is never made to wait - and on
+        // a quiet day (the common case) nothing is ever deferred at all.
+        if (_lastRefreshMs < 30 || !typing) { searchRefresh(); return; }
+        _searchT = setTimeout(searchRefresh, 140);
+      };
+      f.onkeydown = function (e) {
+        // Only Enter and Escape drop a pending refresh - both refresh themselves, so the coalesced
+        // one would be redundant. Cancelling on ANY keydown would strand the grid: an arrow key or
+        // a modifier pressed mid-word would kill the scheduled refresh with nothing to reschedule
+        // it, leaving rows that no longer match what the box says.
+        if (e.key === "Enter" && f.value.trim()) {
+          if (_searchT) { clearTimeout(_searchT); _searchT = null; }
+          addFilter(f.value.trim()); f.value = ""; state.input = ""; refresh();
+        } else if (e.key === "Escape" && f.value) {
+          if (_searchT) { clearTimeout(_searchT); _searchT = null; }
+          e.preventDefault(); f.value = ""; state.input = ""; state.page = 0; refresh();
+        }
+      };
+    }
+    var sclr = document.getElementById("search_clear");
+    if (sclr) sclr.onclick = function () { var fi = document.getElementById("filter"); if (fi) { fi.value = ""; fi.focus(); } state.input = ""; state.page = 0; refresh(); };
+    document.querySelectorAll("thead th[data-key]").forEach(function (th) {
+      th.setAttribute("tabindex", "0"); th.setAttribute("role", "button");
+      th.setAttribute("aria-label", "sort by " + (th.textContent || th.dataset.key).trim());
+      function sortBy() {
+        var k = th.dataset.key;
+        if (state.sortKey === k) state.sortDir *= -1;
+        else { state.sortKey = k; state.sortDir = (k === "sev" || k === "count" || k === "last" || k === "first") ? -1 : 1; }
+        state.page = 0; refresh();
+      }
+      th.onclick = sortBy;
+      th.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortBy(); } };
+    });
+    var ss = document.getElementById("seg-size");
+    if (ss) ss.querySelectorAll("button").forEach(function (b) {
+      b.onclick = function () { state.limit = +b.dataset.size; state.page = 0; ss.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); }); b.classList.add("on"); savePrefs(); refresh(); };
+    });
+    var di = document.getElementById("date_input");
+    if (di) {
+      di.onchange = function () {
+        // arrow-key nudging on the focused input still fires this; guard against an empty value just in case
+        if (!di.value) { di.value = di.dataset.day || todayStr(); renderDateFace(); return; }
+        di.dataset.day = di.value; renderDateFace(); navigate(di.value);
+      };
+      // click the readout -> our own themed calendar (not the OS popup, which renders a white box + a "Clear" on
+      // some browsers). preventDefault + stopPropagation so the field doesn't open the native picker and the
+      // outside-click closer doesn't immediately dismiss ours. Arrow keys still nudge the day natively.
+      di.onclick = function (e) { e.preventDefault(); e.stopPropagation(); openDatePicker(); };
+      di.onkeydown = function (e) {
+        if (e.key === "Enter" || e.key === " " || (e.altKey && e.key === "ArrowDown")) { e.preventDefault(); openDatePicker(); }
+      };
+    }
+    var pv = document.getElementById("prev_day"); if (pv) pv.onclick = function () { shiftDay(-1); };
+    var nx = document.getElementById("next_day"); if (nx) nx.onclick = function () { shiftDay(1); };
+    // keyboard nav (ignored while typing in a field):
+    //   ←/→        previous/next TABLE PAGE (the frequent move)
+    //   PageUp/Dn  previous/next DAY (real mode; the bigger jump)
+    //   ↑/↓        move row selection   ·   Enter open drawer   ·   "/" focus search
+    // focus trap: an open dialog (drawer / modal) has aria-modal="true"; keep Tab inside it (Esc + focus-restore already wired)
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab") return;
+      var dlg = null, ovs = document.querySelectorAll(".modal-overlay"); if (ovs.length) dlg = ovs[ovs.length - 1];   // topmost modal wins
+      if (!dlg) { var dw = document.getElementById("drawer"); if (dw && dw.classList.contains("open")) dlg = dw; }
+      if (!dlg) return;
+      var nodes = dlg.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'), f = [];
+      for (var i = 0; i < nodes.length; i++) if (nodes[i].getClientRects().length) f.push(nodes[i]);
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1], ae = document.activeElement;
+      if (f.indexOf(ae) < 0) { e.preventDefault(); first.focus(); }                       // focus escaped the dialog -> pull back in
+      else if (e.shiftKey && ae === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && ae === last) { e.preventDefault(); first.focus(); }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var ae = document.activeElement, tag = ae && ae.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (ae && ae.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); if (state.page > 0) gotoPage(state.page - 1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); gotoPage(state.page + 1); }   // refresh() clamps to the last page
+      else if (e.key === "PageUp") { if (!DEMO) { e.preventDefault(); shiftDay(-1); } }
+      else if (e.key === "PageDown") { if (!DEMO) { e.preventDefault(); shiftDay(1); } }
+      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        var rows = state._pageRows || []; if (!rows.length) return; e.preventDefault();
+        state.selIdx = e.key === "ArrowDown" ? Math.min(rows.length - 1, state.selIdx + 1) : Math.max(0, state.selIdx - 1);
+        highlightSel();
+      } else if (e.key === "Enter") {
+        var r = (state._pageRows || [])[state.selIdx]; if (r) { e.preventDefault(); openDrawer(r); }   // match mouse-click affordance
+      } else if (e.key === "/") {
+        var fi = document.getElementById("filter"); if (fi) { e.preventDefault(); fi.focus(); }
+      } else if (e.key === "?") {   // Shift+/ -> keyboard shortcuts overlay
+        e.preventDefault(); openShortcuts();
+      }
+    });
+    var _sc = document.getElementById("shortcuts_link"); if (_sc) _sc.onclick = function (e) { e.preventDefault(); openShortcuts(); };
+  }
+  function openShortcuts() {
+    if (document.getElementById("kbd_overlay")) return;
+    var KEYS = [
+      ["←  →", "previous / next page"],
+      ["Page Up / Down", "previous / next day"],
+      ["↑  ↓", "select a row"],
+      ["Enter", "open selected threat"],
+      ["/", "focus search"],
+      ["?", "this shortcut list"],
+      ["Esc", "close panel / clear search"]
+    ];
+    var rows = KEYS.map(function (k) {
+      var keys = k[0].split(/\s+/).map(function (kk) { return '<kbd>' + esc(kk) + '</kbd>'; }).join(" ");
+      return '<div class="kbd-row"><span class="kbd-keys">' + keys + '</span><span class="kbd-desc">' + esc(k[1]) + '</span></div>';
+    }).join("");
+    var o = document.createElement("div"); o.id = "kbd_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal kbd-modal" role="dialog" aria-label="keyboard shortcuts" aria-modal="true">' +
+      '<div class="modal-h">Keyboard shortcuts</div><div class="kbd-list">' + rows + '</div>' +
+      '<div class="modal-actions"><button class="btn-primary" id="kbd_close">Got it</button></div></div>';
+    document.body.appendChild(o);
+    var ret = document.activeElement;
+    function close() { o.remove(); if (ret && ret.focus) { try { ret.focus(); } catch (e) {} } }
+    o.onclick = function (e) { if (e.target === o) close(); };
+    var btn = o.querySelector("#kbd_close"); btn.focus();
+    btn.onclick = close;
+    o.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  }
+  // ---- sensor liveness: which sensors are still checking in (server /sensors) ----
+  // The event log cannot answer this. A sensor that died and a sensor watching a quiet link both
+  // produce no events, which is how a broken sensor stayed broken for weeks in issue #19627.
+  function openSensors() {
+    if (document.getElementById("sensors_overlay")) return;
+    var o = document.createElement("div"); o.id = "sensors_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal hunt-modal" role="dialog" aria-label="sensors" aria-modal="true">' +
+      '<div class="modal-h">Sensors <small>last check-in of every sensor reporting to this server</small></div>' +
+      '<div class="hunt-results" id="sensors_results"><div class="hunt-empty">loading…</div></div></div>';
+    document.body.appendChild(o);
+    var ret = document.activeElement;
+    function close() { o.remove(); if (ret && ret.focus) { try { ret.focus(); } catch (e) {} } }
+    o.onclick = function (e) { if (e.target === o) close(); };
+    o.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    o.tabIndex = -1; o.focus();
+    var res = o.querySelector("#sensors_results");
+    if (DEMO) { res.innerHTML = '<div class="hunt-empty">sensor status needs a running server (unavailable in the static demo).</div>'; return; }
+    fetch("/sensors", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d) markSensors(d);
+        if (!document.body.contains(o)) return;
+        if (!d) { res.innerHTML = '<div class="hunt-empty">could not read sensor status.</div>'; return; }
+        paintSensors(res, d);
+      })
+      .catch(function () { res.innerHTML = '<div class="hunt-empty">could not read sensor status (network).</div>'; });
+  }
+  // Without opening anything: a dot on the menu button and a count on its Sensors entry while any
+  // sensor is past the server's stale threshold. Read at load and on the 30 s relative-time tick.
+  var _staleSensors = 0;
+  function _isStale(d, s) { return (d.now || Math.floor(Date.now() / 1000)) - (s.last_seen || 0) > d.stale_after; }
+  function markSensors(d) {
+    _staleSensors = (d.sensors || []).filter(function (s) { return _isStale(d, s); }).length;
+    var nm = document.getElementById("nav_menu"); if (!nm) return;
+    nm.classList.toggle("has-stale", _staleSensors > 0);
+    nm.title = _staleSensors ? _staleSensors + " sensor(s) silent - see Sensors" : "menu";
+  }
+  function checkSensors() {
+    if (DEMO) return;
+    fetch("/sensors", { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) markSensors(d); }).catch(function () { });
+  }
+  // Floors rather than rounds, so the label never reads "60m ago" on the way to an hour.
+  function _sensorAgo(sec) {
+    if (sec < 90) return sec + "s ago";
+    if (sec < 3600) return Math.floor(sec / 60) + "m ago";
+    if (sec < 86400) return Math.floor(sec / 3600) + "h ago";
+    return Math.floor(sec / 86400) + "d ago";
+  }
+  function paintSensors(res, d) {
+    var list = d.sensors || [];
+    var now = d.now || Math.floor(Date.now() / 1000);
+    // Refused senders first, and whether or not anything checked in: a sensor whose secret or
+    // clock is wrong has every datagram refused, its heartbeats too, so it is in this list only.
+    var refused = "";
+    (d.rejected || []).slice().reverse().forEach(function (r) {
+      refused += '<div class="sens-row is-stale"><span class="sens-addr">' + esc(r.address || "") + '</span>' +
+                 '<span class="sens-name">' + fmtN(r.count || 0) + ' datagram(s) refused: ' + esc(r.reason || "") + '</span>' +
+                 '<span class="sens-ago">' + _sensorAgo(Math.max(0, now - (r.last_seen || 0))) + '</span></div>';
+    });
+    if (refused) refused = '<div class="hunt-sum">refused senders</div><div class="sens-rows">' + refused + '</div>';
+    // Accepted, but dated outside the skew window: filed under another day, so absent from today's
+    // view and from alerting. "clock" = its heartbeat is off too, i.e. a wrong clock, not a replay.
+    var names = {}, skew = "";
+    list.forEach(function (s) { if (s.address) names[s.address] = s.sensor; });
+    (d.skewed || []).slice().reverse().forEach(function (r) {
+      skew += '<div class="sens-row is-stale"><span class="sens-addr">' + esc((names[r.address] ? names[r.address] + " " : "") + (r.address || "")) + '</span>' +
+              '<span class="sens-name">' + fmtN(r.count || 0) + ' datagram(s) dated ' + ((r.offset || 0) / 3600).toFixed(1) + ' h off the server clock' + (r.clock ? ', heartbeats too (wrong clock)' : '') + '; filed under those days</span>' +
+              '<span class="sens-ago">' + _sensorAgo(Math.max(0, now - (r.last_seen || 0))) + '</span></div>';
+    });
+    if (skew) refused += '<div class="hunt-sum">senders off the server clock</div><div class="sens-rows">' + skew + '</div>';
+    var a = d.alert || {};
+    if (a.dropped || a.failures) refused = '<div class="hunt-sum">alert webhook</div><div class="sens-rows"><div class="sens-row is-stale">' +
+                                          '<span class="sens-name">' + fmtN(a.dropped || 0) + ' alert(s) dropped, ' + fmtN(a.queued || 0) + ' waiting' + (a.failures ? ': ' + esc(a.last_error || "") : '') + '</span></div></div>' + refused;
+    // Events that arrived but could not be written (LOG_DIR unwritable, disk full): lost, while
+    // every sensor below still looks healthy. Above everything else for that reason.
+    var w = d.write || {};
+    if (w.dropped) refused = '<div class="hunt-sum">event log</div><div class="sens-rows"><div class="sens-row is-stale">' +
+                             '<span class="sens-name">' + fmtN(w.dropped) + ' event(s) dropped, not written: ' + esc(w.last_error || "") + '</span>' +
+                             '<span class="sens-ago">' + _sensorAgo(Math.max(0, now - (w.last_failed || 0))) + '</span></div></div>' + refused;
+    if (!list.length) {
+      // Say what to do about it: an empty list is the normal state of every deployment that has
+      // not turned heartbeats on yet, and "no sensors" alone reads as an outage.
+      res.innerHTML = refused + '<div class="hunt-empty">No sensor has checked in.<br><br>Sensors report in only when they are configured with both <b>LOG_SERVER</b> (pointing here) and a non-zero <b>HEARTBEAT_PERIOD</b>.</div>';
+      return;
+    }
+    // Sort by the freshest first, so whatever is wrong is at the bottom where it stands out
+    // against the healthy rows above it.
+    list = list.slice().sort(function (a, b) { return (b.last_seen || 0) - (a.last_seen || 0); });
+    var h = refused + '<div class="hunt-sum">' + fmtN(list.length) + ' sensor(s)</div><div class="sens-rows">';
+    list.forEach(function (s) {
+      var age = Math.max(0, now - (s.last_seen || 0));
+      // stale_after is the server's SENSOR_STALE_AFTER, the same threshold its silence alert uses.
+      var cls = _isStale(d, s) ? " is-stale" : "";
+      h += '<div class="sens-row' + cls + '"><span class="sens-name">' + esc(s.sensor) + '</span>' +
+           '<span class="sens-ver">' + (s.version ? esc(s.version) : "&mdash;") + '</span>' +
+           '<span class="sens-addr">' + esc(s.address || "") + '</span>' +
+           '<span class="sens-ago">' + _sensorAgo(age) +
+           // Packets the capture dropped since the sensor started (heartbeat counters, newer sensors).
+           (s.captured > 0 && s.dropped > 0 ? ' &middot; ' + (100 * s.dropped / s.captured).toFixed(1) + '% dropped' : '') +
+           '</span></div>';
+    });
+    res.innerHTML = h + "</div>";
+  }
+
+  // ---- retro-hunt: sweep ALL historical daily logs for an IOC (server /hunt, bounded + scope-filtered) ----
+  function openHunt() {
+    if (document.getElementById("hunt_overlay")) return;
+    var pre = ((document.getElementById("filter") || {}).value || "").trim();
+    var o = document.createElement("div"); o.id = "hunt_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal hunt-modal" role="dialog" aria-label="retro-hunt" aria-modal="true">' +
+      '<div class="modal-h">Retro-hunt <small>search the entire log history for an IOC</small></div>' +
+      '<div class="hunt-in"><input id="hunt_q" placeholder="domain, IP, or CIDR — e.g. evil.com · 1.2.3.4 · 5.6.0.0/16" autocomplete="off" spellcheck="false"><button class="btn-primary" id="hunt_go">Hunt</button></div>' +
+      '<div class="modal-err" id="hunt_err"></div><div class="hunt-results" id="hunt_results"></div></div>';
+    document.body.appendChild(o);
+    var ret = document.activeElement;
+    function close() { o.remove(); if (ret && ret.focus) { try { ret.focus(); } catch (e) {} } }
+    o.onclick = function (e) { if (e.target === o) close(); };
+    o.onkeydown = function (e) { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    var inp = o.querySelector("#hunt_q"); inp.value = pre; inp.focus(); inp.select();
+    o.querySelector("#hunt_go").onclick = function () { runHunt(o); };
+    inp.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); runHunt(o); } };
+    if (pre) runHunt(o);   // a search is already active -> hunt it immediately
+  }
+  function runHunt(o) {
+    var q = (o.querySelector("#hunt_q").value || "").trim();
+    var err = o.querySelector("#hunt_err"), res = o.querySelector("#hunt_results");
+    err.textContent = "";
+    if (DEMO) { err.textContent = "retro-hunt needs a running server (unavailable in the static demo)."; res.innerHTML = ""; return; }
+    if (q.length < 3) { err.textContent = "enter at least 3 characters."; res.innerHTML = ""; return; }
+    res.innerHTML = '<div class="hunt-empty">hunting…</div>';
+    fetch("/hunt?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) { err.textContent = "hunt failed."; res.innerHTML = ""; return; }
+        if (d.error) { err.textContent = d.error; res.innerHTML = ""; return; }
+        paintHunt(o, q, d);
+      })
+      .catch(function () { err.textContent = "hunt failed (network)."; res.innerHTML = ""; });
+  }
+  function _huntObservable(q) {
+    // a single domain / IP is a valid /meta key; search operators / wildcards / CIDR / grouping are not
+    if (/[\s()*]/.test(q) || q.indexOf("/") >= 0) return null;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(q)) return q;                       // ipv4
+    if (q.indexOf(":") >= 0 && /^[0-9a-f:]+$/i.test(q)) return q;          // ipv6
+    if (/^(?=.{1,253}$)([a-z0-9_-]+\.)+[a-z0-9-]{2,}$/i.test(q)) return q; // domain
+    return null;
+  }
+  function _agoTxt(d) { return d <= 0 ? "today" : (d === 1 ? "yesterday" : d + " days ago"); }
+  function _metaEnrich(m) {   // optional auto-enrichment fields from /meta (IP observables): country / category / bad-ASN
+    var s = "";
+    if (m.country) s += " &middot; " + esc(m.country);
+    if (m.category) s += " &middot; " + esc(m.category);
+    if (m.reputation === "bad") s += ' <span class="nf-bad">⚠ bad ASN</span>';
+    return s;
+  }
+  function _drawerFirstSeen(d, obs) {
+    // "network memory" for the threat's trail: when it was first seen anywhere on the wire + how often (meta.sqlite)
+    if (DEMO) return;
+    var key = _huntObservable(obs); if (!key) return;
+    var el = d.querySelector("#dwr_netfirst"); if (!el) return;
+    fetch("/meta?observable=" + encodeURIComponent(key), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (!m || !m.first_seen || !d.classList.contains("open")) return;
+        var now = Date.now() / 1000, ageD = Math.max(0, Math.floor((now - m.first_seen) / 86400));
+        var isNew = ageD === 0;
+        el.className = "dwr-netfirst" + (isNew ? " is-new" : "");
+        el.innerHTML = "network memory: first seen <b>" + _agoTxt(ageD) + "</b> · " + fmtN(m.count) + " observation(s)" + _metaEnrich(m) + (isNew ? ' <span class="nf-new">NEW</span>' : "");
+      }).catch(function () {});
+  }
+  function _drawerSource(d, trail) {
+    // on-demand source citation: the '# Reference:' of the static-trails pile this trail came from (scanned server-side)
+    if (DEMO || !trail) return;
+    var el = d.querySelector("#dwr_source"); if (!el) return;
+    fetch("/reference?trail=" + encodeURIComponent(trail), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (!m || (!m.reference && !m.source) || !d.classList.contains("open")) return;
+        var ref = m.reference || "";
+        // which maltrail list it came from (prettified filename) - kept for the tooltip, not shouted inline
+        var list = (m.source || "").split("/").pop().replace(/\.[^.]+$/, "").replace(/_/g, " ");
+        var tip = (ref ? ref : "") + (ref && m.source ? "  ·  " : "") + (m.source || "");
+        // how strongly the sources agree (trails.confidence): 100 = curated/static or your own
+        // entry, 40+15/extra feed up to 4. Absent -> say nothing rather than guess.
+        var conf = "";
+        if (typeof m.confidence === "number") {
+          if (m.confidence >= 100) conf = ' · <span class="tt-dim" title="curated/static source, or one of your own trails">100% confidence</span>';
+          else {
+            var extra = Math.min(4, Math.max(0, Math.round((m.confidence - 40) / 15)));
+            conf = ' · <span class="' + (extra >= 2 ? "tt-dim" : "nf-new") + '" title="' +
+                   (extra >= 2 ? extra + " feeds beyond the first agree" : "single-source listing - verify before acting") +
+                   '">' + m.confidence + "% confidence</span>";
+          }
+        }
+        var body;
+        if (/^https?:\/\//i.test(ref)) {                       // URL citation -> show just the authority host + ↗
+          var host = ref.replace(/^https?:\/\//i, "").split("/")[0].replace(/^www\./, "");
+          body = '<a href="' + esc(ref) + '" target="_blank" rel="noopener noreferrer" title="' + esc(tip) + '">' + esc(host || ref) + " ↗</a>";
+        } else if (ref) {                                      // non-URL note (dork/fingerprint/etc.) -> short text, full in tooltip
+          body = '<span title="' + esc(tip) + '">' + esc(ref.length > 52 ? ref.slice(0, 51) + "…" : ref) + "</span>";
+        } else {                                               // no reference header -> just name the list
+          body = '<span class="tt-dim" title="' + esc(m.source) + '">' + esc(list) + "</span>";
+        }
+        el.innerHTML = "source: " + body + conf;
+      }).catch(function () {});
+  }
+  function _huntFirstSeen(o, q) {
+    // novelty / first-contact banner from the condensed observable store (meta.sqlite): answers "have I EVER
+    // seen this, since when, how often" — including traffic that was never an event (so it can show even with 0 hits)
+    if (DEMO) return;
+    var obs = _huntObservable(q); if (!obs) return;
+    fetch("/meta?observable=" + encodeURIComponent(obs), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (!m || !m.first_seen) return;
+        var res = o.querySelector("#hunt_results"); if (!res) return;
+        var now = Date.now() / 1000;
+        var ageD = Math.max(0, Math.floor((now - m.first_seen) / 86400));
+        var lastD = Math.max(0, Math.floor((now - m.last_seen) / 86400));
+        var isNew = ageD === 0;
+        if (res.querySelector(".hunt-meta")) return;   // already appended for this render
+        var div = document.createElement("div");
+        div.className = "hunt-meta" + (isNew ? " is-new" : "");
+        div.innerHTML = '<span class="hm-tag">' + (isNew ? "new to network" : "traffic memory") + '</span>' +
+          "first seen <b>" + _agoTxt(ageD) + "</b> · last seen " + _agoTxt(lastD) +
+          " · " + fmtN(m.count) + " obs" + (m.scope ? " · " + esc(m.scope) : "") + _metaEnrich(m);
+        res.appendChild(div);
+      }).catch(function () {});
+  }
+  function paintHunt(o, q, d) {
+    var res = o.querySelector("#hunt_results"), counts = d.counts || {};
+    var days = Object.keys(counts).sort().reverse(), total = 0, max = 1;
+    days.forEach(function (k) { total += counts[k]; if (counts[k] > max) max = counts[k]; });
+    // d.partial is the one day the server's time budget cut short. Its count is NOT that day's
+    // total, so it is deliberately kept out of d.counts (and therefore out of the timeline and the
+    // sum) and called out on its own - an undercount shown as a normal bar is the one thing a
+    // retro-hunt must not do.
+    var partial = d.partial && d.partial.date ? d.partial : null;
+    var partialHtml = partial
+      ? '<div class="hunt-trunc">⚠ ' + esc(partial.date) + ' was only scanned in part before the time budget ran out — at least '
+        + fmtN(partial.hits) + ' hit(s) there, but that is not the day\'s total. Re-run with &from=' + esc(partial.date) + ' for a complete count.</div>'
+      : "";
+    if (!days.length) {
+      res.innerHTML = partialHtml + '<div class="hunt-empty">No hits for &ldquo;' + esc(q) + '&rdquo; in ' + (d.scanned || 0) + ' fully scanned day(s) of history.</div>';
+      _huntFirstSeen(o, q); return;
+    }
+    var html = '<div class="hunt-sum">' + fmtN(total) + ' hit(s) across ' + days.length + ' day(s) &middot; scanned ' + (d.scanned || 0)
+             + (d.selected && d.selected > d.scanned ? ' of ' + fmtN(d.selected) : '') + ' day(s)</div>';
+    if (d.truncated) html += '<div class="hunt-trunc">⚠ partial results — a scan limit was hit. Narrow the IOC or add &from=/&to= for the full picture.</div>';
+    html += partialHtml;
+    html += '<div class="hunt-timeline">' + days.map(function (k) {
+      return '<button class="hunt-day" data-d="' + esc(k) + '"><span class="hd-date">' + esc(k) + '</span><span class="hd-track"><span class="hd-bar" style="width:' + (6 + Math.round(94 * counts[k] / max)) + '%"></span></span><span class="hd-n">' + fmtN(counts[k]) + '</span></button>';
+    }).join("") + '</div>';
+    if (d.samples && d.samples.length) {
+      html += '<div class="hunt-samples">' + d.samples.map(function (s) {
+        return '<div class="hunt-samp"><span class="hs-date">' + esc(s.date) + '</span><span class="hs-line" title="' + esc(s.line) + '">' + esc(s.line) + '</span></div>';
+      }).join("") + (d.capped_samples ? '<div class="hunt-empty">…sample list capped at the server limit</div>' : "") + '</div>';
+    }
+    res.innerHTML = html;
+    res.querySelectorAll(".hunt-day").forEach(function (b) { b.onclick = function () { huntGoto(o, b.getAttribute("data-d"), q); }; });
+    _huntFirstSeen(o, q);   // auxiliary meta row, appended below the detection results
+  }
+  function huntGoto(o, date, q) {
+    o.remove();
+    state.filters = []; state.sev = null; state.page = 0;
+    // land on the day, filtered to the IOC. a bare IP/domain works as free-text; a CIDR must use the search's CIDR
+    // operators (src:/dst: support it, plain text doesn't) so the day view actually filters to the hunted netblock.
+    state.input = /\//.test(q) ? ("src:" + q + " OR dst:" + q) : q;
+    var f = document.getElementById("filter"); if (f) f.value = state.input;
+    setDate(date); navigate(date);
+  }
+  // reflect the current view in the URL (shareable/bookmarkable; replaceState => no history spam, no hashchange listener => no loops)
+  function syncHash() {
+    var p = [];
+    if (state.filters.length) p.push('filter=' + encodeURIComponent(state.filters.join(',')));
+    if (state.input.trim()) p.push('q=' + encodeURIComponent(state.input.trim()));
+    if (state.sev != null) p.push('sev=' + state.sev);
+    if (state.sortKey !== 'sev') p.push('sort=' + encodeURIComponent(state.sortKey));
+    if (state.sortDir > 0) p.push('dir=asc');
+    if (state.limit !== 25) p.push('limit=' + state.limit);
+    if (state.page > 0) p.push('page=' + (state.page + 1));
+    if (state._openChart) p.push('chart=' + encodeURIComponent(state._openChart));
+    var h = p.join('&');
+    try { history.replaceState(null, '', h ? ('#' + h) : (location.pathname + location.search)); }
+    catch (e) { try { if (h) location.hash = h; } catch (e2) { } }
+  }
+  function parseHash() {
+    var h = location.hash.replace(/^#/, ""); if (!h) return;
+    h.split("&").forEach(function (p) {
+      var kv = p.split("="), k, v;
+      try { k = decodeURIComponent(kv[0] || ""); v = decodeURIComponent(kv[1] || ""); }
+      catch (e) { return; }   // a malformed %-escape (e.g. "#q=%") makes decodeURIComponent throw URIError; unguarded it propagates out of parseHash() and aborts boot() before wire()/applyPrefsUI() -> dead UI from a crafted/shared link. Skip just the bad pair.
+      if (k === "filter" && v) v.split(",").forEach(function (x) { if (x) state.filters.push(x.toLowerCase()); });
+      else if (k === "sort" && v) state.sortKey = v;
+      else if (k === "dir" && v) state.sortDir = v === "asc" ? 1 : -1;
+      else if (k === "limit" && v) state.limit = +v || 25;
+      else if (k === "chart" && v) state._openChart = v;
+      else if (k === "sev" && v) state.sev = (v === "1" || v === "2" || v === "3") ? +v : null;
+      else if (k === "q" && v) state.input = v;
+      else if (k === "page" && v) state.page = Math.max(0, (+v || 1) - 1);
+    });
+  }
+  // DEMO when demo.js is present (file://, the github.io demo, the published artifact). The real server strips the
+  // demo.js <script>, so getDemoCSV is undefined there -> live /events path.
+  var DEMO = (typeof window.getDemoCSV === "function");
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  // "Today" is the SENSOR's day (log files are named by it), not the viewer's: a viewer a day ahead
+  // used to open on a day the server had no events for yet (#67).
+  function todayStr() {
+    var tz = srvTz();
+    if (tz == null) { var d = new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+    var u = new Date(Date.now() + tz * 60000);
+    return u.getUTCFullYear() + "-" + pad2(u.getUTCMonth() + 1) + "-" + pad2(u.getUTCDate());
+  }
+  // Issue #4 (open since 2015): a selection can be one day or a range, spelled "START_END" - the
+  // form /events has always understood. `date_input` is a native <input type="date"> and cannot
+  // hold that string, so a range lives in its dataset and the input keeps the range's LAST day
+  // (which is what the native control should show, and what prev/next step from).
+  var RANGE_RE = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/;
+  function rangeParts(s) { var m = RANGE_RE.exec(s || ""); return m ? [m[1], m[2]] : null; }
+  function isRange(s) { return !!rangeParts(s); }
+  function daySpan(a, b) { return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000) + 1; }
+  function addDays(ds, n) {
+    var dt = new Date(ds + "T00:00:00"); dt.setDate(dt.getDate() + n);
+    return dt.getFullYear() + "-" + pad2(dt.getMonth() + 1) + "-" + pad2(dt.getDate());
+  }
+  function currentDate() {
+    var d = document.getElementById("date_input");
+    if (d && d.dataset && isRange(d.dataset.day)) return d.dataset.day;
+    return d && d.value ? d.value : todayStr();
+  }
+  var MON_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  // keep the condensed two-row readout (MON DD / YYYY) in sync with the hidden native date input
+  function renderDateFace() {
+    var cur = currentDate(), top = document.getElementById("df_top"), bot = document.getElementById("df_bot"),
+        face = document.getElementById("dateface"), r = rangeParts(cur), m;
+    if (r) {
+      var a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(r[0]), b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(r[1]);
+      if (!a || !b) return;
+      // same month reads "JAN 01–07"; across months the second month is named too
+      if (top) top.textContent = a[2] === b[2] && a[1] === b[1]
+        ? MON_ABBR[(+a[2] - 1) % 12] + " " + a[3] + "–" + b[3]
+        : MON_ABBR[(+a[2] - 1) % 12] + " " + a[3] + " – " + MON_ABBR[(+b[2] - 1) % 12] + " " + b[3];
+      if (bot) bot.textContent = daySpan(r[0], r[1]) + " DAYS";
+      if (face) face.title = r[0] + " to " + r[1] + " — shift-click a day to change the range, click one day for live view";
+      return;
+    }
+    m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(cur); if (!m) return;
+    if (top) top.textContent = MON_ABBR[(+m[2] - 1) % 12] + " " + m[3];
+    if (bot) bot.textContent = m[1];
+    if (face) face.title = "pick a day — shift-click a second day for a range";
+  }
+  function setDate(s) {
+    var d = document.getElementById("date_input"), r = rangeParts(s);
+    if (d) { d.value = r ? r[1] : s; d.dataset.day = s; }
+    renderDateFace();
+  }
+
+  // ---- day picker: a cal-heatmap–style event-density grid (GitHub-contributions look), rendered natively (no d3) ----
+  // Shows the last few months as a grid of day-squares colored by that day's event volume (from /counts): an empty
+  // day is a flat cell, a flooded day a bright one, so you see WHERE the noise was and click straight to it. Also
+  // replaces the native OS date popup (white box + confusing "Clear" on some browsers).
+  var MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var _counts = {};          // "YYYY-MM-DD" -> approx events that day
+  var _countsSpans = {};     // "from..to" -> its fetch promise, so each span is fetched at most once
+  var HM_MONTHS = 4;         // months shown side by side
+  function fmtYMD(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function heatBucket(n) { return !n ? 0 : n < 500 ? 1 : n < 1000 ? 2 : n < 5000 ? 3 : n < 10000 ? 4 : 5; }   // cal-heatmap-style thresholds
+  function fetchCounts(fromStr, toStr) {
+    if (DEMO) return;   // /counts is a server capability; the demo holds one day and must not invent densities for the rest
+    var key = fromStr + ".." + toStr; if (_countsSpans[key]) return _countsSpans[key];
+    return (_countsSpans[key] = fetch("/counts?from=" + fromStr + "&to=" + toStr, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (o) { if (!o) return false; for (var k in o) _counts[k] = o[k]; if (state._dpOpen) buildHeatmap(); return true; })   // repaint once densities arrive
+      .catch(function () { _countsSpans[key] = null; return false; }));   // let a transient failure retry on next open
+  }
+  function ensureDatePop() {
+    var pop = document.getElementById("datepop"); if (pop) return pop;
+    pop = document.createElement("div");
+    pop.id = "datepop"; pop.className = "datepop"; pop.hidden = true;
+    pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "pick a day");
+    var leg = ""; for (var q = 0; q <= 5; q++) leg += '<i class="ch-q' + q + '"></i>';
+    pop.innerHTML =
+      '<div class="dp-head"><button class="dp-nav" type="button" data-d="-1" aria-label="earlier months">‹</button>' +
+      '<span class="dp-title"></span>' +
+      '<button class="dp-nav" type="button" data-d="1" aria-label="later months">›</button></div>' +
+      '<div class="ch-months"></div>' +
+      '<div class="dp-foot"><span>fewer</span><span class="ch-legend">' + leg + '</span><span>more events</span></div>';
+    document.body.appendChild(pop);
+    pop.addEventListener("click", function (e) { e.stopPropagation(); });   // internal clicks never reach the outside-close handler
+    pop.querySelectorAll(".dp-nav").forEach(function (b) { b.onclick = function () { shiftMonths(+b.dataset.d); }; });
+    pop.addEventListener("keydown", function (e) { if (e.key === "Escape") { closeDatePicker(); var a = document.getElementById("date_input"); if (a) a.focus(); } });
+    return pop;
+  }
+  function monthGrid(y, m, todayS, sel) {   // one month: 7 weekday rows × week columns of day-squares (Monday-start)
+    var wrap = document.createElement("div"); wrap.className = "ch-month";
+    var grid = document.createElement("div"); grid.className = "ch-grid";
+    var lead = (new Date(y, m, 1).getDay() + 6) % 7, i;   // blank cells before the 1st so weekdays line up in rows
+    for (i = 0; i < lead; i++) { var pad = document.createElement("span"); pad.className = "ch-d ch-pad"; grid.appendChild(pad); }
+    var days = new Date(y, m + 1, 0).getDate();
+    for (i = 1; i <= days; i++) {
+      var ds = fmtYMD(new Date(y, m, i)), future = ds > todayS, n = future ? 0 : (_counts[ds] || 0);
+      var c = document.createElement("span");
+      c.className = "ch-d ch-q" + heatBucket(n) + (future ? " ch-fut" : "") + (ds === sel ? " ch-sel" : "");
+      c.dataset.date = ds;
+      c.title = MON_SHORT[m] + " " + i + " " + y + (future ? "" : " · " + (n ? (n >= 100 ? "≈ " : "") + fmtN(n) + " events" : "no events"));
+      if (!future) c.onclick = function (ev) { pickDay(this.dataset.date, ev && ev.shiftKey); };
+      grid.appendChild(c);
+    }
+    wrap.appendChild(grid);
+    var lab = document.createElement("div"); lab.className = "ch-mlabel"; lab.textContent = MON_SHORT[m] + " '" + ("" + y).slice(2);
+    wrap.appendChild(lab);
+    return wrap;
+  }
+  function buildHeatmap() {
+    var pop = ensureDatePop();
+    var t = new Date(); t.setHours(0, 0, 0, 0);
+    var todayS = fmtYMD(t), sel = currentDate();
+    var months = [], yy = state._dpY, mm = state._dpM, k;   // window ENDS at (_dpY,_dpM); walk HM_MONTHS back
+    for (k = 0; k < HM_MONTHS; k++) { months.unshift([yy, mm]); mm--; if (mm < 0) { mm = 11; yy--; } }
+    var a = months[0], b = months[HM_MONTHS - 1];
+    pop.querySelector(".dp-title").textContent = MON_SHORT[a[1]] + " – " + MON_SHORT[b[1]] + " " + b[0];
+    pop.querySelector('.dp-nav[data-d="1"]').disabled = (state._dpY > t.getFullYear()) || (state._dpY === t.getFullYear() && state._dpM >= t.getMonth());   // window can't end past this month
+    fetchCounts(fmtYMD(new Date(a[0], a[1], 1)), fmtYMD(new Date(b[0], b[1] + 1, 0)));   // one request spans all visible months
+    var host = pop.querySelector(".ch-months"); host.innerHTML = "";
+    months.forEach(function (ym) { host.appendChild(monthGrid(ym[0], ym[1], todayS, sel)); });
+  }
+  function positionDatePop() {
+    var pop = document.getElementById("datepop"), anchor = document.getElementById("dateface"); if (!pop || !anchor) return;
+    _placeBelow(pop, anchor, 6);   // zoom-safe (A-/A+ CSS zoom on <html>), flips above / clamps to viewport as needed
+  }
+  function openDatePicker() {
+    if (DEMO) return;   // one day of data and no /counts to build the heat grid from
+    var di = document.getElementById("date_input"); if (di && di.disabled) return;   // offline -> navigation unavailable
+    closeCtx();
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(currentDate()), now = new Date(), t = new Date();
+    state._dpOpen = true;
+    state._dpY = m ? +m[1] : now.getFullYear();
+    state._dpM = m ? (+m[2] - 1) : now.getMonth();   // 0-based; window ends at the selected day's month
+    if (state._dpY > t.getFullYear() || (state._dpY === t.getFullYear() && state._dpM > t.getMonth())) { state._dpY = t.getFullYear(); state._dpM = t.getMonth(); }
+    buildHeatmap();
+    var pop = document.getElementById("datepop"); pop.hidden = false; positionDatePop();
+  }
+  function closeDatePicker() { var pop = document.getElementById("datepop"); if (pop && !pop.hidden) { pop.hidden = true; state._dpOpen = false; } }
+  function shiftMonths(delta) {
+    var t = new Date(), y = state._dpY, m = state._dpM + delta;
+    while (m < 0) { m += 12; y--; } while (m > 11) { m -= 12; y++; }
+    if (y > t.getFullYear() || (y === t.getFullYear() && m > t.getMonth())) return;   // window can't end past the current month
+    state._dpY = y; state._dpM = m; buildHeatmap(); positionDatePop();
+  }
+  function pickDay(ds, extend) {
+    if (DEMO) return;
+    var di = document.getElementById("date_input"); if (di && di.disabled) return;
+    var sel = ds;
+    if (extend) {
+      // extend from whichever end of the current selection is furthest away, so shift-clicking
+      // either side of a range grows it rather than silently replacing it
+      var cur = currentDate(), r = rangeParts(cur), anchor = r ? (ds < r[0] ? r[1] : r[0]) : cur;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(anchor) && anchor !== ds) sel = anchor < ds ? anchor + "_" + ds : ds + "_" + anchor;
+    }
+    setDate(sel); closeDatePicker(); navigate(sel); if (di) di.focus();
+  }
+  var _demoCSVc;
+  // Re-date the demo's events to today at load, so the dashboard never shows a stale absolute date
+  // in the drawer or an export. The day is DERIVED from the data, not hardcoded: it used to be a
+  // literal "2024-01-11" coupled to whatever demo.js happened to hold, so regenerating demo.js on
+  // any other day made this replace silently do nothing and froze the demo at that old date.
+  // Every distinct day shifts by the same number of days, so a multi-day demo keeps its span.
+  function demoCSV() {
+    if (_demoCSVc) return _demoCSVc;
+    var raw = "" + window.getDemoCSV(), days = {}, m, rx = /"(\d{4}-\d{2}-\d{2}) /g;
+    while ((m = rx.exec(raw)) !== null) days[m[1]] = 1;
+    var list = Object.keys(days).sort();
+    if (!list.length) return (_demoCSVc = raw);
+    var newest = new Date(list[list.length - 1] + "T00:00:00"), today = new Date(todayStr() + "T00:00:00");
+    var shift = Math.round((today - newest) / 86400000);
+    if (shift) {
+      for (var i = 0; i < list.length; i++) {
+        var d = new Date(list[i] + "T00:00:00"); d.setDate(d.getDate() + shift);
+        raw = raw.split('"' + list[i] + ' ').join('"' + fmtYMD(d) + ' ');
+      }
+    }
+    return (_demoCSVc = raw);
+  }
+  function navigate(date) {
+    if (getView() === "map" && !getCollapsed()) renderWorldMap();   // keep the attack map on the viewed day
+    if (DEMO) { render(aggregate(demoCSV())); return; }
+    if (state.live) { stopLive(); }   // tear down the stream for the old day
+    loadEvents(date);
+    if (state.live) { state._sseOk = false; openSSE(date); }   // and re-open it for the new day
+  }
+  function shiftDay(delta) {
+    var cur = currentDate(), r = rangeParts(cur), ns;
+    if (r) {
+      // step a whole window at a time: "the previous 7 days" is what the arrows should mean once
+      // a 7-day range is on screen, not "the same range shifted by one day"
+      var span = daySpan(r[0], r[1]);
+      ns = addDays(r[0], delta * span) + "_" + addDays(r[1], delta * span);
+    } else if (!DEMO) {
+      // Step to the nearest day that HAS events (#19614): an empty day shows nothing, so landing on one is a
+      // wasted click. Today is always a stop (live). Without counts it is a plain one-day step, as before.
+      var today = todayStr(), lo = delta < 0 ? addDays(cur, -366) : addDays(cur, 1), hi = delta < 0 ? addDays(cur, -1) : today;
+      Promise.resolve(fetchCounts(lo, hi)).then(function (ok) {
+        var d = addDays(cur, delta);
+        if (ok) for (var x = d; x >= lo && x <= hi; x = addDays(x, delta)) if (_counts[x] > 0 || x === today) { d = x; break; }
+        setDate(d); navigate(d);
+      });
+      return;
+    } else {
+      ns = addDays(cur, delta);
+    }
+    setDate(ns); navigate(ns);
+  }
+
+  function render(d) {
+    state.all = d.threats; state.agg = d; _viewVer++; _dataVer++;   // new/merged data: drop the cached grid view and the related-threat index
+    warmRelIndex();
+    if (DEMO) { var mx = 0; for (var di = 0; di < d.threats.length; di++) { var p = parseTs(d.threats[di].last); if (p > mx) mx = p; } state._demoNow = mx || null; }   // anchor demo "now" to its latest event so relative times demo correctly
+    if (!state.streaming) {   // new-threat detection only on a COMPLETE load (not progressive partials)
+      var newOnes = markNew(d.threats, currentDate());
+      var newHigh = newOnes.filter(function (t) { return t.sev === 3; });
+      if (state.live && newHigh.length) alertNew(newHigh);
+    }
+    state._statsSig = null; refresh();   // refresh() owns stats rendering now (full or filtered); null forces a redraw on new data
+    state.newUids = {};   // flash is one-time; the 'N new' pill (newCount) persists until cleared
+    if (!state._intro) {   // one orchestrated reveal on first paint; removed so later renders/refreshes don't replay
+      state._intro = true;
+      var st = document.getElementById("stats"), gw = document.querySelector(".grid-wrap");
+      if (st) st.classList.add("intro"); if (gw) gw.classList.add("intro");
+      setTimeout(function () { if (st) st.classList.remove("intro"); if (gw) gw.classList.remove("intro"); }, 1000);
+    }
+    if (state._openChart) showChart(state._openChart);
+    scheduleMapRefresh();   // attack map follows live/new data too (throttled; no-op unless the map view is open)
+    window.__MT = d;
+  }
+  function setStatus(msg) {
+    var tb = document.getElementById("rows");
+    if (tb) tb.innerHTML = '<tr><td colspan="12" style="padding:48px;text-align:center;color:var(--muted);font-family:var(--mono)">' + esc(msg) + '</td></tr>';
+  }
+  // Connectivity → enables/disables Live + the day calendar. A DEMO build (demo.js present → opened via file://
+  // or hosted statically) has NO backend at all, so Live can never stream and the day calendar can never load
+  // another day: hard-disable both regardless of navigator.onLine (Firefox reports onLine=true for file:// when
+  // the machine has internet, even though there is no server). In a real (server-served) build demo.js is stripped,
+  // so the authoritative signal is whether a server fetch SUCCEEDED (covers air-gapped installs: server reachable
+  // with no internet); fall back to navigator.onLine only until the first fetch result arrives.
+  function setConnected(ok) { state._serverReachable = !!ok; applyConn(); }   // called from fetch success/failure
+  function applyConn() {
+    var ok = DEMO ? false                                    // static/demo build -> no server -> Live + calendar off
+           : state._serverReachable === true ? true
+           : state._serverReachable === false ? false
+           : (navigator.onLine !== false);   // unknown (no fetch yet) -> trust the browser's online flag
+    if (state._connected === ok) return;
+    state._connected = ok;
+    var lb = document.getElementById("live_btn");
+    if (lb) { lb.disabled = !ok; lb.title = ok ? "live auto-refresh + alerts on new high-severity" : "offline / server unreachable — live unavailable"; }
+    ["prev_day", "next_day", "date_input"].forEach(function (id) { var e = document.getElementById(id); if (e) e.disabled = !ok; });
+    document.body.classList.toggle("offline", !ok);
+    if (!ok && state.live) setLive(false);   // stop a running live stream when we go offline
+  }
+  function checkAuth() {
+    fetch("/whoami", { credentials: "same-origin" })
+      .then(function (r) { return r.status === 200 ? r.text() : ""; })
+      .then(function (u) {
+        var link = document.getElementById("login_link"); if (!link) return;
+        if (u && u !== "?") { link.textContent = "Log out (" + u + ")"; link.onclick = function () { location.href = "logout"; }; }
+        else if (u === "?") { link.style.display = "none"; }              // no auth configured
+        else { link.textContent = "Log in"; link.onclick = showLogin; }   // anonymous, auth required
+      }).catch(function () { });
+  }
+
+  // ---- SHA-256, HMAC and PBKDF2 over bytes. Synchronous and dependency-free on purpose: a dashboard
+  // served over plain http is not a secure context, and SubtleCrypto does not exist there. ----
+  var SHA_K = new Int32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+  var SHA_IV = new Int32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  var SHA_W = new Int32Array(64);
+  function shaBlock(H, b, o) {
+    var W = SHA_W, i, t1, t2;
+    for (i = 0; i < 16; i++) W[i] = (b[o + 4 * i] << 24) | (b[o + 4 * i + 1] << 16) | (b[o + 4 * i + 2] << 8) | b[o + 4 * i + 3];
+    for (i = 16; i < 64; i++) {
+      var x = W[i - 15], y = W[i - 2];
+      W[i] = (((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3)) + W[i - 7] +
+             (((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10)) + W[i - 16] | 0;
+    }
+    var a = H[0], c1 = H[1], c2 = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (i = 0; i < 64; i++) {
+      t1 = h + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) + ((e & f) ^ (~e & g)) + SHA_K[i] + W[i] | 0;
+      t2 = (((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) + ((a & c1) ^ (a & c2) ^ (c1 & c2)) | 0;
+      h = g; g = f; f = e; e = d + t1 | 0; d = c2; c2 = c1; c1 = a; a = t1 + t2 | 0;
+    }
+    H[0] = H[0] + a | 0; H[1] = H[1] + c1 | 0; H[2] = H[2] + c2 | 0; H[3] = H[3] + d | 0;
+    H[4] = H[4] + e | 0; H[5] = H[5] + f | 0; H[6] = H[6] + g | 0; H[7] = H[7] + h | 0;
+  }
+  // The digest of `msg`, continuing from state H after `prefix` bytes (0, or one 64-byte HMAC pad).
+  function shaFinish(H0, prefix, msg) {
+    var H = new Int32Array(H0), n = msg.length, total = prefix + n, len = (n + 72) & ~63, b = new Uint8Array(len), out = new Uint8Array(32), i;
+    b.set(msg); b[n] = 0x80;
+    b[len - 4] = (total * 8) >>> 24; b[len - 3] = (total * 8) >>> 16; b[len - 2] = (total * 8) >>> 8; b[len - 1] = total * 8;
+    b[len - 5] = (total / 0x20000000) | 0;
+    for (i = 0; i < len; i += 64) shaBlock(H, b, i);
+    for (i = 0; i < 8; i++) { out[4 * i] = H[i] >>> 24; out[4 * i + 1] = H[i] >>> 16; out[4 * i + 2] = H[i] >>> 8; out[4 * i + 3] = H[i]; }
+    return out;
+  }
+  function sha256(bytes) { return shaFinish(SHA_IV, 0, bytes); }
+  function utf8(str) { return new TextEncoder().encode(str); }
+  function toHex(bytes) { var s = ""; for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16); return s; }
+  function fromHex(s) { var b = new Uint8Array(s.length >> 1); for (var i = 0; i < b.length; i++) b[i] = parseInt(s.substr(2 * i, 2), 16); return b; }
+  function sha256hex(str) { return toHex(sha256(utf8(str))); }
+  // HMAC with the key's two pad blocks hashed once, so each PBKDF2 round costs two compressions.
+  function hmacKey(key) {
+    if (key.length > 64) key = sha256(key);
+    var pad = new Uint8Array(64), inner = new Int32Array(SHA_IV), outer = new Int32Array(SHA_IV), i;
+    for (i = 0; i < 64; i++) pad[i] = (key[i] || 0) ^ 0x36;
+    shaBlock(inner, pad, 0);
+    for (i = 0; i < 64; i++) pad[i] = (key[i] || 0) ^ 0x5c;
+    shaBlock(outer, pad, 0);
+    return { inner: inner, outer: outer };
+  }
+  function hmac(k, msg) { return shaFinish(k.outer, 64, shaFinish(k.inner, 64, msg)); }
+  function pbkdf2(password, salt, iterations) {
+    var k = hmacKey(password), block = new Uint8Array(salt.length + 4), u, out, i, j;
+    block.set(salt); block[salt.length + 3] = 1;
+    u = hmac(k, block); out = new Uint8Array(u);
+    for (i = 1; i < iterations; i++) { u = hmac(k, u); for (j = 0; j < 32; j++) out[j] ^= u[j]; }
+    return out;
+  }
+  // The login proof of core/password.py: SCRAM's ClientKey XOR ClientSignature, keyed on sha256(password).
+  function loginProof(user, pw, prm) {
+    var salted = pbkdf2(utf8(sha256hex(pw)), fromHex(prm.salt), prm.iterations),
+        clientKey = hmac(hmacKey(salted), utf8("Client Key")),
+        sig = hmac(hmacKey(sha256(clientKey)), utf8(user + ":" + prm.nonce));
+    for (var i = 0; i < 32; i++) sig[i] ^= clientKey[i];
+    return toHex(sig);
+  }
+
+  function showLogin() {
+    if (document.getElementById("login_overlay")) return;
+    var o = document.createElement("div"); o.id = "login_overlay"; o.className = "modal-overlay";
+    o.innerHTML = '<div class="modal"><div class="modal-h">Sign in to Maltrail</div>' +
+      '<label for="li_user">Username</label><input id="li_user" autocomplete="username">' +
+      '<label for="li_pass">Password</label><input id="li_pass" type="password" autocomplete="current-password">' +
+      '<div id="li_err" class="modal-err"></div>' +
+      '<div class="modal-actions"><button class="btn-ghost" id="li_cancel">Cancel</button><button class="btn-primary" id="li_go">Sign in</button></div></div>';
+    document.body.appendChild(o);
+    var pass = o.querySelector("#li_pass"), go = o.querySelector("#li_go"), err = o.querySelector("#li_err");
+    o.querySelector("#li_cancel").onclick = function () { o.remove(); };
+    o.onclick = function (e) { if (e.target === o) o.remove(); };
+    function submit() {
+      var u = o.querySelector("#li_user").value, p = pass.value;
+      if (!u || !p) { err.textContent = "Enter username and password."; return; }
+      go.disabled = true; err.textContent = "";
+      // Two steps: the server's salt, iterations and a fresh nonce, then the proof - for every account,
+      // an old sha256 USERS entry included (the server derives its verifier from that digest).
+      fetch("/login/params?username=" + encodeURIComponent(u), { credentials: "same-origin" })
+        .then(function (r) { if (!r.ok) throw r; return r.json(); })
+        .then(function (prm) {
+          var body = "username=" + encodeURIComponent(u) + "&nonce=" + prm.nonce + "&proof=" + loginProof(u, p, prm);
+          return fetch("/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body });
+        })
+        .then(function (r) {
+          if (r.status === 200) location.href = "/";
+          else if (r.status === 401) { err.textContent = "Wrong username and/or password."; go.disabled = false; }
+          else if (r.status === 403) { r.text().then(function (t) { err.textContent = t; }); go.disabled = false; }
+          else { err.textContent = "Login failed (HTTP " + r.status + ")."; go.disabled = false; }
+        }).catch(function () { err.textContent = "Network connection issue."; go.disabled = false; });
+    }
+    go.onclick = submit; pass.onkeydown = function (e) { if (e.key === "Enter") submit(); };
+    o.querySelector("#li_user").focus();
+  }
+  // Progressive load: stream /events and fold each chunk INCREMENTALLY into a running aggregate (mergeRows),
+  // so a 100MB/850k-row day is O(n) total — NOT O(n²) (the old code re-aggregated all rows every chunk) —
+  // and memory stays bounded (we never retain the full parsed-rows array, only the aggregate).
+  var RENDER_EVERY = 12000; // rows between progressive repaints
+  // ...and a floor on how OFTEN one can happen. The row gate alone gave ~16 repaints for a busy
+  // day, and each one re-filters and re-sorts every threat: on a fast (or local) connection they
+  // landed tens of milliseconds apart, which is far quicker than anyone can read a table, so the
+  // work bought nothing. On a slow connection chunks are already further apart than this and the
+  // gate never binds - progressive feedback is unchanged where it actually matters.
+  var RENDER_MIN_MS = 220;
+  // ...and a ceiling on the share of the load a repaint may take. Each progressive paint
+  // re-filters, re-sorts and re-counts everything so far, so on a slow CPU the paints were the
+  // load: at 4x throttle, 20% of a 200k-event day's load was viewList and topN. The interval
+  // between paints is at least RENDER_DUTY times the last paint's cost, so painting stays under
+  // a fifth of the time wherever the page runs, without touching the first paint.
+  var RENDER_DUTY = 4;
+  function parseRows(text) { return parseEvents(text); }
+  function loadEvents(date) {
+    setStatus("loading events…");
+    var seq = ++state._loadSeq;
+    if (state._wload) state._wload.cancel();
+    state._wload = null;
+    function fail() { if (seq !== state._loadSeq) return; state.streaming = false; state._wload = null; setConnected(false); setStatus("no connection to the server"); }
+    fetch("/events?date=" + encodeURIComponent(date), { credentials: "same-origin" })
+      .then(function (r) {
+        setConnected(true);                                          // server responded -> reachable
+        if (seq !== state._loadSeq) return;                         // superseded by a newer navigation
+        if (r.status === 401) { setStatus("authentication required — log in to view events"); showLogin(); return; }
+        if (!r.ok) { setStatus("could not load events (HTTP " + r.status + ")"); return; }
+        if (!r.body || !r.body.getReader) {                         // no streaming support -> one-shot
+          return r.text().then(function (t) {
+            if (seq !== state._loadSeq) return;
+            var rows = parseEvents(t);
+            state._liveBytes = byteLenFull(t, r); state._liveDate = date;   // byte baseline for incremental live
+            render(aggregateRows(rows));   // agg retains _byKey so live deltas merge incrementally (rows array is freed)
+            autoLive();
+          });
+        }
+        var reader = r.body.getReader(), seen = 0, lastRender = 0, lastRenderT = 0, bytes = 0, paintMs = 0;
+        state.streaming = true;
+        // The FIRST progressive paint is exempt from the rate floor: it is the one the user is
+        // waiting on, and making it wait moved time-to-first-rows from 544ms to 800ms - a
+        // regression in exactly the thing that reads as responsive. Only the repaints AFTER it
+        // are throttled, which is where the wasted work actually was.
+        function maybePaint(agg) {
+          if (agg && seen - lastRender >= RENDER_EVERY &&
+              (lastRenderT === 0 || _now() - lastRenderT >= Math.max(RENDER_MIN_MS, paintMs * RENDER_DUTY))) {
+            lastRender = seen; var _pt = _now(); render(agg); lastRenderT = _now(); paintMs = lastRenderT - _pt;
+          }
+        }
+        var w = newWorker();
+        window.__MT_WORKER = !!w;
+        if (w) {
+          // The bytes go to the worker as they arrive and its deltas patch state._wagg (see
+          // applyDelta); this thread only paints, at the same pace as before. At most IN_FLIGHT
+          // bytes are unacknowledged, so a slow worker slows the download instead of the whole
+          // file piling up in its queue; the window is wide enough that a paint here (hundreds
+          // of ms on a huge day) does not leave the worker idle, and narrow enough that what the
+          // page posts back (the paint costs) is not read a second later.
+          var IN_FLIGHT = 8 << 20, inflight = 0, stalled = false, wagg = (state._wagg = workerAgg());
+          state._wload = { seq: seq,
+            ack: function (m) { inflight -= m.len; if (stalled && inflight < IN_FLIGHT) { stalled = false; wpump(); } },
+            // a stalled pump has no read outstanding, so nothing would notice that this load was
+            // superseded or its worker lost: the response would stay open, holding one of the
+            // server's request threads, until the browser gave up on it
+            cancel: function () { if (stalled) { stalled = false; try { reader.cancel(); } catch (e) { } } },
+            delta: function (m, t0) {
+              // the worker paced this delta by what the last one cost here; the paint itself is
+              // still gated, so deltas that queued up behind a slow paint are applied, not painted
+              seen = m.events;
+              if (lastRenderT === 0 || _now() - lastRenderT >= Math.max(RENDER_MIN_MS, paintMs * RENDER_DUTY)) {
+                lastRender = seen; render(wagg); lastRenderT = _now(); paintMs = lastRenderT - t0;   // apply + paint
+                w.postMessage({ op: "paint", seq: seq, ms: paintMs });
+              }
+            },
+            done: function (m) {
+              state._wload = null; state.streaming = false;
+              state._liveBytes = bytes - m.tail; state._liveDate = date;   // baseline = end of last COMPLETE line
+              window.__MT_WSTATS = m.stats;   // where the worker's time went (diagnostics)
+              render(wagg);
+              autoLive();
+            } };
+          function wpump() {
+            return reader.read().then(function (res) {
+              if (seq !== state._loadSeq) { try { reader.cancel(); } catch (e) { } return; }
+              if (res.done) { w.postMessage({ op: "end", seq: seq }); return; }
+              var v = res.value, len = v.byteLength; bytes += len;              // raw bytes, matches the server's file offsets
+              w.postMessage({ op: "chunk", seq: seq, buf: v.buffer, off: v.byteOffset, len: len }, [v.buffer]);
+              inflight += len;   // read before the post: the transfer detaches the buffer and the view then reads as empty
+              if (inflight < IN_FLIGHT) return wpump();
+              stalled = true;
+            }).catch(fail);
+          }
+          return wpump();
+        }
+        var dec = new TextDecoder(), buf = "", agg = null;
+        function pump() {
+          return reader.read().then(function (res) {
+            if (seq !== state._loadSeq) { try { reader.cancel(); } catch (e) { } return; }
+            if (res.done) {
+              buf += dec.decode();
+              state.streaming = false;
+              // maltrail always terminates event lines with "\n", so a non-empty `buf` here is an
+              // INCOMPLETE final line (EOF caught mid-append). Do NOT parse it and do NOT count it in
+              // the live baseline: otherwise _liveBytes jumps past a half-written line and its
+              // completion is never re-read on the next tick (a silently lost/corrupted live event).
+              var tail = 0; try { tail = new TextEncoder().encode(buf).length; } catch (e) { tail = buf.length; }
+              state._liveBytes = bytes - tail; state._liveDate = date;   // baseline = end of last COMPLETE line
+              render(agg || aggregateRows([]));
+              autoLive();
+              return;
+            }
+            bytes += res.value.byteLength;                          // raw bytes, matches the server's file offsets
+            buf += dec.decode(res.value, { stream: true });
+            var nl = buf.lastIndexOf("\n");
+            if (nl >= 0) {
+              var chunk = parseRows(buf.slice(0, nl)); buf = buf.slice(nl + 1);
+              if (chunk.length) { agg = mergeRows(agg, chunk); seen += chunk.length; }   // fold chunk in; chunk array is then freed (bounded memory)
+            }
+            maybePaint(agg);
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(fail);
+  }
+  // ---- the worker: parsing and aggregation off the main thread (js/worker.js) ----
+  // The page keeps its own copy of the threats, patched from the worker's deltas, so everything
+  // that reads state.all / state.agg is untouched. One worker holds one day: a new load
+  // terminates the previous worker, which hands that day's memory back at once (V8 would keep a
+  // worker's heap for a minute after its last allocation), and leaves nothing of it to confuse
+  // the next. A browser without workers, a policy that blocks them, a script that fails to load
+  // and a crash inside one all land on the in-thread path above (the engine is the same code
+  // either way); `localStorage.mt_worker = "0"` forces that path for a session where a worker
+  // misbehaves.
+  var _W = null, _workerDead = false;
+  var ASSETVER = (function () { try { var s = document.querySelector('script[src*="js/main.js"]'), m = s && /[?&]v=([^&]+)/.exec(s.getAttribute("src") || ""); return m ? m[1] : ""; } catch (e) { return ""; } })();
+  function newWorker() {
+    if (_W) { try { _W.terminate(); } catch (e) { } _W = null; }
+    if (_workerDead || DEMO) return null;
+    if (typeof Worker === "undefined" || typeof TextDecoder === "undefined" || lsGet("mt_worker", 1) === 0) { _workerDead = true; return null; }
+    try { _W = new Worker("js/worker.js" + (ASSETVER ? "?v=" + encodeURIComponent(ASSETVER) : "")); }
+    catch (e) { _W = null; _workerDead = true; return null; }
+    var me = _W;
+    me.onmessage = onWorkerMessage;
+    me.onerror = function () { if (me === _W) workerFailed(); };   // the browser has logged it; the page just stops relying on it (a late error from a worker already replaced is not this one's)
+    _W.postMessage({ op: "init", sev: SEV_RAW, pace: { every: RENDER_EVERY, minMs: RENDER_MIN_MS, duty: RENDER_DUTY } });
+    return _W;
+  }
+  function workerFailed() {
+    var w = _W; _W = null; _workerDead = true;
+    try { if (w) w.terminate(); } catch (e) { }
+    if (!DEMO) loadEvents(currentDate());   // whatever was in flight or on screen came from it: rebuild here (it cancels a stalled pump first)
+  }
+  function onWorkerMessage(e) {
+    var m = e.data; if (!m || m.seq !== state._loadSeq) return;   // a reply to a superseded navigation, like a late fetch
+    var L = state._wload; if (L && L.seq !== m.seq) L = null;
+    if (m.op === "delta") { var t0 = _now(); applyDelta(m); if (L) L.delta(m, t0); }
+    else if (m.op === "ack") { if (L) L.ack(m); }
+    else if (m.op === "done") { if (L) L.done(m); }
+    else if (m.op === "merged") { if (!L) render(state._wagg); }   // a live merge; during a load the paced paints cover it
+  }
+  // The page's copy of a worker-built day: the engine's aggregate minus its merge-only maps
+  // (_trailSrcs, _flood), and with srcCounts / trailCounts holding only the top entries (topN).
+  function workerAgg() {
+    var z = function () { return new Array(24).fill(0); };
+    return { threats: [], events: 0, sources: 0, trailsN: 0, hours: z(), sevHours: { 3: z(), 2: z(), 1: z() }, sevCount: { 3: 0, 2: 0, 1: 0 },
+             typeCounts: {}, srcCounts: new Map(), trailCounts: new Map(), typeHours: {}, _byKey: null, _dropped: 0, _worker: true };
+  }
+  // The six collected sets of a threat from their flat form (js/worker.js:sets). Filled with
+  // add(): `new Set(array)` takes the iterator protocol and was a quarter of the page's time.
+  var SET_FIELDS = ["srcS", "sportS", "dstS", "dportS", "protoS", "sensorS"];
+  function setSets(t, v, n, cap) {
+    for (var i = 0, o = 0; i < 6; i++) {
+      var vals = new Set(), end = o + n[i], capped = !!(cap & (1 << i));
+      while (o < end) vals.add(v[o++]);
+      t[SET_FIELDS[i]] = { n: capped ? MAX_CONDENSED : n[i], capped: capped, vals: vals };
+    }
+  }
+  // ...and the values they gained since the last delta, appended: n[i] of `v` go to set i. The
+  // engine's n counts real values, so a capped set (its "…" is among the values) stays at the cap.
+  function growSets(t, v, n, cap) {
+    for (var i = 0, o = 0; i < 6; i++) {
+      var s = t[SET_FIELDS[i]], end = o + n[i];
+      while (o < end) s.vals.add(v[o++]);
+      s.capped = !!(cap & (1 << i)); s.n = s.capped ? MAX_CONDENSED : s.vals.size;
+    }
+  }
+  // A delta (js/worker.js:delta): threats seen for the first time as whole records, appended in
+  // the aggregate's own order, then updates to earlier ones by position, then the totals. Threat
+  // objects keep their identity across deltas (the drawer, the selection and the memoised views
+  // hold references), and a new one is built with the engine's literal, field for field.
+  function applyDelta(m) {
+    var a = state._wagg || (state._wagg = workerAgg()), order = a.threats, recs = m.recs, H = m.hours, n = recs.length, i, j, r, t, ev, o;
+    for (i = 0; i < n; i++) {
+      r = recs[i];
+      t = { key: r[0], kind: r[1], sensor: r[2], src: r[3], sport: r[4], dst: r[5], dport: r[6], proto: r[7],
+            type: r[8], trail: r[9], info: r[10], ref: r[11], count: r[12], first: r[13], last: r[14],
+            hours: new Array(24), sev: r[15],
+            uidc: r[16], _hay: null, _riskT: undefined, _riskN: -1, _risk: 0,
+            srcS: null, sportS: null, dstS: null, dportS: null, protoS: null, sensorS: null, events: r[20] };
+      for (j = 0, o = i * 24; j < 24; j++) t.hours[j] = H[o + j];
+      setSets(t, r[17], r[18], r[19]);
+      order.push(t);
+    }
+    var idx = m.uidx, cnt = m.ucount, first = m.ufirst, last = m.ulast, k = idx.length;
+    for (i = 0; i < k; i++) {
+      t = order[idx[i]]; if (!t) continue;
+      t.count = cnt[i]; t._hay = null;
+      if (first[i] != null) t.first = first[i];
+      if (last[i] != null) t.last = last[i];
+      for (j = 0, o = (n + i) * 24; j < 24; j++) t.hours[j] = H[o + j];
+    }
+    for (i = 0; i < m.uev.length; i++) { r = m.uev[i]; t = order[idx[r[0]]]; ev = r[1]; if (t) for (j = 0; j < ev.length; j++) t.events.push(ev[j]); }
+    for (i = 0; i < m.usets.length; i++) { r = m.usets[i]; t = order[idx[r[0]]]; if (t) growSets(t, r[1], r[2], r[3]); }
+    a.events = m.events; a.sources = m.sources; a.trailsN = m.trailsN; a._dropped = m.dropped;
+    a.hours = m.hoursAll; a.sevHours = m.sevHours; a.sevCount = m.sevCount; a.typeCounts = m.typeCounts; a.typeHours = m.typeHours;
+    a.srcCounts = new Map(m.srcTop); a.trailCounts = new Map(m.trailTop);
+    return a;
+  }
+  // Whether new lines can be folded into the day on screen without reloading it: a baseline
+  // exists - the engine's merge maps here, or the worker that holds them still running.
+  function mergeable() { var a = state.agg; return !!(a && (a._worker ? _W : a._byKey)); }
+  // Lines to fold into the day: through the worker when it owns the aggregate (answered with a
+  // delta and `merged`, which renders), else right here. `full` replaces the day with the text.
+  function mergeText(text, full, seq) {
+    var w = full ? newWorker() : (state.agg && state.agg._worker ? _W : null);
+    if (w) {
+      if (full) state._wagg = workerAgg();
+      w.postMessage({ op: "text", seq: seq, text: text });
+      return;
+    }
+    if (!full && state.agg && state.agg._worker) { loadEvents(currentDate()); return; }   // the worker that built this day is gone, and the page's copy cannot be merged into (mergeRows would replace the day with these lines)
+    var rows = parseEvents(text);
+    render(full ? aggregateRows(rows) : mergeRows(state.agg, rows));
+  }
+  function autoLive() { if (state._autoLive) { state._autoLive = false; if (!state.live && state._connected !== false) setLive(true); } }
+  function byteLenFull(text, r) {
+    var cl = r.headers && r.headers.get && r.headers.get("Content-Length");
+    if (cl != null && cl !== "") { var n = parseInt(cl, 10); if (!isNaN(n)) return n; }
+    try { return new TextEncoder().encode(text).length; } catch (e) { return text.length; }
+  }
+  // incremental live update: fetch ONLY the bytes appended since the last load (HTTP Range),
+  // merge them into the retained row set, and re-aggregate in memory — never re-downloads the whole log.
+  function liveTick(date) {
+    if (DEMO) { render(aggregate(demoCSV())); return; }   // demo has no server; just repaint
+    // need a byte baseline + a mergeable aggregate for THIS date; otherwise fall back to a normal full load
+    if (state._liveBytes == null || state._liveBytes < 0 || state._liveDate !== date || !mergeable()) { loadEvents(date); return; }
+    var start = state._liveBytes, seq = ++state._loadSeq;
+    fetch("/events?date=" + encodeURIComponent(date), { credentials: "same-origin", headers: { "Range": "bytes=" + start + "-" + LIVE_MAX_END } })
+      .then(function (r) {
+        setConnected(true);
+        if (seq !== state._loadSeq) return;
+        if (r.status === 401) { setStatus("authentication required — log in to view events"); showLogin(); return; }
+        if (r.status === 416) { state._liveBytes = -1; loadEvents(date); return; }   // range past EOF => log rotated/shrank => rebuild
+        if (r.status === 200) {                                                       // server ignored Range (e.g. filtered session) => full reload
+          return r.text().then(function (t) {
+            if (seq !== state._loadSeq) return;
+            state._liveBytes = byteLenFull(t, r); state._liveDate = date;
+            mergeText(t, true, seq);
+          });
+        }
+        if (r.status !== 206) { if (!r.ok) setStatus("live update failed (HTTP " + r.status + ")"); return; }
+        return r.arrayBuffer().then(function (ab) {                                    // raw bytes => exact offset accounting
+          if (seq !== state._loadSeq) return;
+          if (ab.byteLength > 0) {
+            var u8 = new Uint8Array(ab), nl = -1, i;
+            for (i = u8.length - 1; i >= 0; i--) { if (u8[i] === 10) { nl = i; break; } }   // last '\n' in the raw delta
+            if (nl >= 0) {                                                              // consume ONLY complete lines
+              state._liveBytes = start + nl + 1; state._liveDate = date;                // advance past complete lines only; a partial tail is re-fetched next tick (no dropped/split event)
+              mergeText(new TextDecoder().decode(ab.slice(0, nl + 1)), false, seq);     // O(new rows) merge — no full re-parse/re-aggregate
+            }
+            // else: only a partial line appended so far => consume nothing, retry from `start` next tick
+          }
+          // empty delta => nothing changed; leave the table untouched (never overwrite it with a status line)
+        });
+      })
+      .catch(function () { setConnected(false); /* transient live poll failure: keep showing current data, try again next tick */ });
+  }
+  // persist view preferences (page size) across reloads
+  function savePrefs() { lsSet('mt_prefs', { limit: state.limit }); }
+  function loadPrefs() {
+    var p = lsGet('mt_prefs', null); if (!p || typeof p !== 'object') return;
+    if ([25, 50, 100].indexOf(p.limit) >= 0) state.limit = p.limit;
+  }
+  function applyPrefsUI() {
+    var ss = document.getElementById('seg-size'); if (ss) ss.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', +b.dataset.size === state.limit); });
+  }
+  function boot() {
+    // <!LOGO!> is server-substituted to the maltrail logo (or config.HEADER_LOGO). When unsubstituted
+    // (demo / file:// / artifact — no server), the token becomes a bogus comment -> inject the default logo.
+    var _bl = document.querySelector(".brandlogo"); if (_bl && !_bl.querySelector("img")) _bl.innerHTML = '<img src="images/mlogo.png" alt="" style="width:24px">altrail';
+    loadPrefs(); applyTheme(getTheme()); applyScale(getScaleIdx()); applyView(); applyMuted(getMuted()); migrateLegacy(); parseHash(); wire(); applyPrefsUI();
+    checkSensors();
+    setInterval(function () { refreshRelTimes(); checkSensors(); }, 30000);   // keep "Xm ago" labels current between renders, and the silent-sensor marker
+    window.addEventListener("online", applyConn); window.addEventListener("offline", applyConn);
+    applyConn();   // initial: an offline-opened page starts with Live + calendar disabled
+    var _fi = document.getElementById('filter'); if (_fi && state.input) _fi.value = state.input;
+    // The server fills <!VERSION!> per request. A static copy has it substituted at build time
+    // (maltraildemo's build.sh); opened raw from disk it is not, and the parser drops `<!...!>`
+    // as a bogus comment, leaving the span empty - which is the ONLY case that needs a label.
+    // Overriding unconditionally is how the published demo came to announce itself as a
+    // "redesign prototype" long after the redesign shipped.
+    var ve = document.querySelector(".ver");
+    if (ve && DEMO && !ve.textContent.trim()) ve.textContent = "demo";
+    if (DEMO) {
+      document.title = "Maltrail (demo)";
+      // No server, so nothing can be signed in to: the button would open a password prompt that
+      // posts nowhere. Hidden here rather than in checkAuth(), which only runs on the server path.
+      var dl = document.getElementById("login_link"); if (dl) dl.style.display = "none";
+      setDate(todayStr());   // paging/sort/search stay live; the day picker does not - it needs /counts
+      render(aggregate(demoCSV()));
+      if (getView() === "map" && !getCollapsed()) renderWorldMap();   // demo loaded straight into map view: state.agg is ready now
+    } else {
+      setDate(todayStr());
+      checkAuth();
+      // A threat monitor follows new events unless told not to. Live used to start off and forget
+      // being switched on, so every session opened on a table that stayed still until someone
+      // noticed. Armed once the first load completes (see loadEvents) so the stream resumes from
+      // exactly the bytes the table holds.
+      state._autoLive = lsGet("mt_live", true) === true;
+      var start = function () {
+        loadEvents(todayStr());
+        // ?refresh=N -> auto-reload the current day's events every N seconds (min 5; keeps filters/sort/hidden/tags)
+        var rm = location.search.match(/[?&]refresh=(\d+)/);
+        if (rm) { var n = Math.max(5, parseInt(rm[1], 10) || 0); if (n) setInterval(function () { liveTick(currentDate()); }, n * 1000); }
+      };
+      // Chrome renders a page it predicts you will open (address bar, bookmarks) invisibly ahead of time
+      // unless "Preload pages" is off. Measured: that hidden copy fetched the whole day's /events - a full
+      // file scan on the server - and could not parse it anyway (its worker only starts once shown), so
+      // the day is loaded when the page is actually shown. Other browsers never set the flag.
+      if (document.prerendering) document.addEventListener("prerenderingchange", start, { once: true }); else start();
+    }
+    if (!DEMO && location.hash.indexOf("login") >= 0) showLogin();   // test/deep-link hook (no server to sign in to in a demo)
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
+})();

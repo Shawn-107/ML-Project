@@ -1,0 +1,24 @@
+{
+  "input": "c:\\ML project 2\\reports\\csv\\nf_head_200k.csv",
+  "schema": "netflow_v2",
+  "policy": "fpr_3pct",
+  "output": "c:\\ML project 2\\reports\\csv\\nf_head_scored.csv",
+  "warnings": [],
+  "rows": 200000,
+  "flagged": 112879,
+  "flagged_share": 0.5644,
+  "severity": {
+    "high": 102843,
+    "medium": 10036
+  },
+  "row_status": {
+    "ok": 199941,
+    "warn": 59
+  },
+  "rows_far_outside_training_range_share": 0.0003,
+  "caution": "trained on NF-ToN-IoT only, a dataset that is easy even for unseen hosts: treat scores on other networks as unproven",
+  "hosts_table": "c:\\ML project 2\\reports\\csv\\nf_head_scored.hosts.csv",
+  "hosts_flagged": 23,
+  "lines_skipped_malformed_or_unreadable": 0,
+  "seconds": 8.1
+}

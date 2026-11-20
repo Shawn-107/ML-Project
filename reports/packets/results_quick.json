@@ -1,0 +1,147 @@
+{
+ "data": {
+  "packets": 100000,
+  "train": 51228,
+  "threshold": 17076,
+  "held_out_normal": 17076,
+  "pcap": "C:\\ML project 2\\data\\kitsune\\mirai_example\\mirai.pcap",
+  "target_fpr": 0.01,
+  "labels_used": false,
+  "quick": true,
+  "clean_period": "first 52.0 min (Kitsune paper, Table III), split in time order 60/20/20",
+  "proxy_definition": "minute >= 80 of the capture; chosen from the traffic profile (ARP share 4-7% -> 78-87%), NOT from ground-truth labels"
+ },
+ "summary": {
+  "ae_ensemble(max10)": {
+   "hold_false_alarm_rate": {
+    "mean": 0.011185289294916842,
+    "std": 0.0,
+    "n": 1
+   },
+   "proxy_flagged_share_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   },
+   "proxy_auc_hold_vs_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   }
+  },
+  "single_ae(max100)": {
+   "hold_false_alarm_rate": {
+    "mean": 0.009252752401030686,
+    "std": 0.0,
+    "n": 1
+   },
+   "proxy_flagged_share_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   },
+   "proxy_auc_hold_vs_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   }
+  },
+  "isolation_forest": {
+   "hold_false_alarm_rate": {
+    "mean": 0.012883579292574374,
+    "std": 0.0,
+    "n": 1
+   },
+   "proxy_flagged_share_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   },
+   "proxy_auc_hold_vs_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   }
+  },
+  "rate_rule(pkts/s)": {
+   "hold_false_alarm_rate": {
+    "mean": 0.013937690325603186,
+    "std": 0.0,
+    "n": 1
+   },
+   "proxy_flagged_share_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   },
+   "proxy_auc_hold_vs_min80plus": {
+    "mean": NaN,
+    "std": NaN,
+    "n": 1
+   }
+  }
+ },
+ "runs": {
+  "ae_ensemble(max10)": [
+   {
+    "hold_false_alarm_rate": 0.011185289294916842,
+    "flagged_share_by_8min": {
+     "0-8min": 0.00904105528382985,
+     "8-16min": 0.0058090000774533345,
+     "16-24min": 0.008662696264212236,
+     "24-32min": 0.006654286598576292,
+     "32-40min": 0.009300232505812646,
+     "40-48min": 0.011959040287016966,
+     "48-56min": 0.008666047663262148,
+     "56-64min": 0.005798174191956575
+    }
+   }
+  ],
+  "single_ae(max100)": [
+   {
+    "hold_false_alarm_rate": 0.009252752401030686,
+    "flagged_share_by_8min": {
+     "0-8min": 0.007781236104935527,
+     "8-16min": 0.0032530400433738674,
+     "16-24min": 0.006497022198159177,
+     "24-32min": 0.004719900959455277,
+     "32-40min": 0.010275256881422036,
+     "40-48min": 0.009866208236788998,
+     "48-56min": 0.006112658619622408,
+     "56-64min": 0.0033308660251665434
+    }
+   }
+  ],
+  "isolation_forest": [
+   {
+    "hold_false_alarm_rate": 0.012883579292574374,
+    "flagged_share_by_8min": {
+     "0-8min": 0.010893730546909737,
+     "8-16min": 0.007590426767872357,
+     "16-24min": 0.011215097842060484,
+     "24-32min": 0.007892293407613741,
+     "32-40min": 0.010725268131703292,
+     "40-48min": 0.011585320278047687,
+     "48-56min": 0.010523057876818322,
+     "56-64min": 0.00838884776708611
+    }
+   }
+  ],
+  "rate_rule(pkts/s)": [
+   {
+    "hold_false_alarm_rate": 0.013937690325603186,
+    "flagged_share_by_8min": {
+     "0-8min": 0.017489254483474135,
+     "8-16min": 0.009449306792657423,
+     "16-24min": 0.00781189573826282,
+     "24-32min": 0.010987310430207366,
+     "32-40min": 0.005925148128703217,
+     "40-48min": 0.019209208461021005,
+     "48-56min": 0.009594552770040236,
+     "56-64min": 0.005057981741919566
+    }
+   }
+  ]
+ },
+ "seconds": 23.9
+}

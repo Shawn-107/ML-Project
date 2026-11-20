@@ -1,0 +1,36 @@
+{
+  "trained_on": {
+    "rows": 203866,
+    "source": "NF-ToN-IoT-v2 sample, exact repeats removed, split by source host"
+  },
+  "thresholds": {
+    "fpr_1pct": 0.9610641485988602,
+    "fpr_3pct": 0.9038918389218401
+  },
+  "test_hosts_unseen": {
+    "auc": 0.9999544471106154,
+    "fpr_1pct": {
+      "threshold": 0.9610641485988602,
+      "accuracy": 0.6563824152542372,
+      "recall": 0.6545159228884865,
+      "false_alarm_rate": 0.0,
+      "balanced_accuracy": 0.8272579614442432,
+      "precision": 1.0
+    },
+    "fpr_3pct": {
+      "threshold": 0.9038918389218401,
+      "accuracy": 0.9616260593220339,
+      "recall": 0.9614176163595697,
+      "false_alarm_rate": 0.0,
+      "balanced_accuracy": 0.9807088081797848,
+      "precision": 1.0
+    }
+  },
+  "caution": "this dataset is easy (AUC 1.0 on unseen hosts with all features); do not read that as real-world accuracy",
+  "kind": "netflow_v2",
+  "sha256": "ba1ef34149cd7a2fe5487c0dc8183876fcc39c9d5612815b48065d488585e562",
+  "sklearn": "1.6.1",
+  "numpy": "2.2.6",
+  "pandas": "2.2.3",
+  "trained_at": "2026-11-20T19:39:30"
+}

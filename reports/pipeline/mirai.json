@@ -1,0 +1,843 @@
+{
+ "pcap": "data/kitsune/mirai.pcap",
+ "packets": 764137,
+ "settings": {
+  "name": null,
+  "maltrail": true,
+  "maltrail_log": null,
+  "cache": null,
+  "limit": null,
+  "fm": 5000,
+  "ad": 50000,
+  "calibration": 15000,
+  "fpr": 0.01,
+  "window": 60.0,
+  "null": "burst",
+  "alert_p": null,
+  "budget": 0,
+  "out": null
+ },
+ "alert_p_used": 0.999999999999,
+ "tuning": {
+  "assumption": "everything before the jump is normal (NOT a label)",
+  "budget_alerts_on_tuning_half": 0,
+  "segments": {
+   "first_half": {
+    "minutes": 15.9,
+    "hosts_seen": 20,
+    "host_hours": 5.3
+   },
+   "second_half": {
+    "minutes": 15.9,
+    "hosts_seen": 19,
+    "host_hours": 5.03
+   },
+   "after_jump": {
+    "minutes": 44.6,
+    "hosts_seen": 21,
+    "host_hours": 15.61
+   }
+  },
+  "runs": {
+   "binomial": {
+    "method": "binomial",
+    "swapped": false,
+    "null": {
+     "mu": 0.01,
+     "rho": 0.0
+    },
+    "chosen_alert_p": 0.999999999999,
+    "at_chosen": {
+     "alert_p": 0.999999999999,
+     "tuning_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "heldout_normal_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "after_jump": {
+      "alerts": 11,
+      "hosts": 2
+     }
+    },
+    "curve": [
+     {
+      "alert_p": 0.99,
+      "tuning_half": {
+       "alerts": 9,
+       "hosts": 5
+      },
+      "heldout_normal_half": {
+       "alerts": 6,
+       "hosts": 5
+      },
+      "after_jump": {
+       "alerts": 38,
+       "hosts": 14
+      }
+     },
+     {
+      "alert_p": 0.999,
+      "tuning_half": {
+       "alerts": 6,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 6,
+       "hosts": 5
+      },
+      "after_jump": {
+       "alerts": 31,
+       "hosts": 11
+      }
+     },
+     {
+      "alert_p": 0.9999,
+      "tuning_half": {
+       "alerts": 4,
+       "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 3,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 20,
+       "hosts": 6
+      }
+     },
+     {
+      "alert_p": 0.99999,
+      "tuning_half": {
+       "alerts": 3,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 18,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 18,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.9999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.99999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.999999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.9999999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 13,
+       "hosts": 3
+      }
+     },
+     {
+      "alert_p": 0.999999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 11,
+       "hosts": 2
+      }
+     }
+    ]
+   },
+   "binomial_swapped": {
+    "method": "binomial",
+    "swapped": true,
+    "null": {
+     "mu": 0.01,
+     "rho": 0.0
+    },
+    "chosen_alert_p": 0.9999999,
+    "at_chosen": {
+     "alert_p": 0.9999999,
+     "tuning_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "heldout_normal_half": {
+      "alerts": 1,
+      "hosts": 1
+     },
+     "after_jump": {
+      "alerts": 16,
+      "hosts": 4
+     }
+    },
+    "curve": [
+     {
+      "alert_p": 0.99,
+      "tuning_half": {
+       "alerts": 6,
+       "hosts": 5
+      },
+      "heldout_normal_half": {
+       "alerts": 9,
+       "hosts": 5
+      },
+      "after_jump": {
+       "alerts": 38,
+       "hosts": 14
+      }
+     },
+     {
+      "alert_p": 0.999,
+      "tuning_half": {
+       "alerts": 6,
+       "hosts": 5
+      },
+      "heldout_normal_half": {
+       "alerts": 6,
+       "hosts": 4
+      },
+      "after_jump": {
+       "alerts": 31,
+       "hosts": 11
+      }
+     },
+     {
+      "alert_p": 0.9999,
+      "tuning_half": {
+       "alerts": 3,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 4,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 20,
+       "hosts": 6
+      }
+     },
+     {
+      "alert_p": 0.99999,
+      "tuning_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 3,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 18,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 18,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.9999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.99999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.9999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 13,
+       "hosts": 3
+      }
+     },
+     {
+      "alert_p": 0.999999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 11,
+       "hosts": 2
+      }
+     }
+    ]
+   },
+   "burst": {
+    "method": "burst",
+    "swapped": false,
+    "null": {
+     "mu": 0.00428,
+     "rho": 0.39,
+     "windows_used": 232
+    },
+    "chosen_alert_p": 0.999999999999,
+    "at_chosen": {
+     "alert_p": 0.999999999999,
+     "tuning_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "heldout_normal_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "after_jump": {
+      "alerts": 10,
+      "hosts": 2
+     }
+    },
+    "curve": [
+     {
+      "alert_p": 0.99,
+      "tuning_half": {
+       "alerts": 13,
+       "hosts": 7
+      },
+      "heldout_normal_half": {
+       "alerts": 13,
+       "hosts": 8
+      },
+      "after_jump": {
+       "alerts": 49,
+       "hosts": 13
+      }
+     },
+     {
+      "alert_p": 0.999,
+      "tuning_half": {
+       "alerts": 7,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 9,
+       "hosts": 6
+      },
+      "after_jump": {
+       "alerts": 34,
+       "hosts": 11
+      }
+     },
+     {
+      "alert_p": 0.9999,
+      "tuning_half": {
+       "alerts": 7,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 8,
+       "hosts": 5
+      },
+      "after_jump": {
+       "alerts": 31,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.99999,
+      "tuning_half": {
+       "alerts": 5,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 8,
+       "hosts": 4
+      },
+      "after_jump": {
+       "alerts": 28,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 4,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 4,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 24,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.9999999,
+      "tuning_half": {
+       "alerts": 3,
+       "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 20,
+       "hosts": 6
+      }
+     },
+     {
+      "alert_p": 0.99999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 19,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.999999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 17,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.9999999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 15,
+       "hosts": 3
+      }
+     },
+     {
+      "alert_p": 0.999999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 10,
+       "hosts": 2
+      }
+     }
+    ]
+   },
+   "burst_swapped": {
+    "method": "burst",
+    "swapped": true,
+    "null": {
+     "mu": 0.00624,
+     "rho": 0.2082,
+     "windows_used": 238
+    },
+    "chosen_alert_p": 0.9999999,
+    "at_chosen": {
+     "alert_p": 0.9999999,
+     "tuning_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "heldout_normal_half": {
+      "alerts": 1,
+      "hosts": 1
+     },
+     "after_jump": {
+      "alerts": 17,
+      "hosts": 4
+     }
+    },
+    "curve": [
+     {
+      "alert_p": 0.99,
+      "tuning_half": {
+       "alerts": 12,
+       "hosts": 8
+      },
+      "heldout_normal_half": {
+       "alerts": 14,
+       "hosts": 7
+      },
+      "after_jump": {
+       "alerts": 46,
+       "hosts": 14
+      }
+     },
+     {
+      "alert_p": 0.999,
+      "tuning_half": {
+       "alerts": 8,
+       "hosts": 5
+      },
+      "heldout_normal_half": {
+       "alerts": 7,
+       "hosts": 4
+      },
+      "after_jump": {
+       "alerts": 34,
+       "hosts": 11
+      }
+     },
+     {
+      "alert_p": 0.9999,
+      "tuning_half": {
+       "alerts": 6,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 6,
+       "hosts": 4
+      },
+      "after_jump": {
+       "alerts": 30,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.99999,
+      "tuning_half": {
+       "alerts": 3,
+       "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 4,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 22,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 3,
+       "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 18,
+       "hosts": 5
+      }
+     },
+     {
+      "alert_p": 0.9999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 17,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.99999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 16,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 14,
+       "hosts": 4
+      }
+     },
+     {
+      "alert_p": 0.9999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 1,
+       "hosts": 1
+      },
+      "after_jump": {
+       "alerts": 11,
+       "hosts": 3
+      }
+     },
+     {
+      "alert_p": 0.999999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 9,
+       "hosts": 2
+      }
+     }
+    ]
+   }
+  }
+ },
+ "kitsune": {
+  "cutoff": 0.0805302553534259,
+  "scoring_from_packet": 70001,
+  "jump_packet": 121714,
+  "jump_minute": 74.4,
+  "evidence_windows": 225,
+  "cache_used": true
+ },
+ "maltrail": {
+  "events_for_internal_hosts": 8,
+  "unparsed_lines": 0,
+  "signature_hits": 0,
+  "first_event_minutes": [
+   1.8,
+   7.6,
+   8.5
+  ]
+ },
+ "setups": {
+  "kitsune_only": {
+   "alerts": 10,
+   "hosts_alerted": 2,
+   "alerts_per_host_top5": {
+    "192.168.2.110": 8,
+    "192.168.2.115": 2
+   },
+   "first_alert_minute_per_host": {
+    "192.168.2.110": 79.6,
+    "192.168.2.115": 106.6
+   },
+   "severity": {
+    "critical": 10
+   },
+   "layers_in_alerts": {
+    "packets": 10
+   },
+   "alerts_before_jump": 0,
+   "alerts_after_jump": 10
+  },
+  "maltrail_signature_hits_direct": {
+   "alerts": 0,
+   "hosts_alerted": 0,
+   "alerts_per_host_top5": {},
+   "first_alert_minute_per_host": {},
+   "severity": {},
+   "layers_in_alerts": {},
+   "alerts_before_jump": 0,
+   "alerts_after_jump": 0
+  },
+  "maltrail_heuristics_alone": {
+   "alerts": 0,
+   "hosts_alerted": 0,
+   "alerts_per_host_top5": {},
+   "first_alert_minute_per_host": {},
+   "severity": {},
+   "layers_in_alerts": {},
+   "alerts_before_jump": 0,
+   "alerts_after_jump": 0
+  },
+  "policy_all_layers": {
+   "alerts": 10,
+   "hosts_alerted": 2,
+   "alerts_per_host_top5": {
+    "192.168.2.110": 8,
+    "192.168.2.115": 2
+   },
+   "first_alert_minute_per_host": {
+    "192.168.2.110": 79.6,
+    "192.168.2.115": 106.6
+   },
+   "severity": {
+    "critical": 10
+   },
+   "layers_in_alerts": {
+    "rules": 8,
+    "packets": 10
+   },
+   "alerts_before_jump": 0,
+   "alerts_after_jump": 10
+  },
+  "need_kitsune_and_maltrail": {
+   "alerts": 0,
+   "hosts_alerted": 0,
+   "alerts_per_host_top5": {},
+   "first_alert_minute_per_host": {},
+   "severity": {},
+   "layers_in_alerts": {},
+   "alerts_before_jump": 0,
+   "alerts_after_jump": 0
+  }
+ },
+ "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where Kitsune's scores stay above its cut-off; it is not a labelled attack start. No recall or false-alarm rate is measured.",
+ "alerts_file": "C:\\ML project 2\\reports\\pipeline\\mirai.alerts.jsonl"
+}

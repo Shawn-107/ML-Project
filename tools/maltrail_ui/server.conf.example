@@ -1,0 +1,14 @@
+HTTP_ADDRESS 127.0.0.1
+HTTP_PORT 8338
+USE_SSL false
+USE_SERVER_UPDATE_TRAILS false
+UPDATE_PERIOD 999999999
+DISABLE_CHECK_SUDO true
+MONITOR_INTERFACE any
+CAPTURE_BUFFER 10MB
+SENSOR_NAME layered-nids
+LOG_DIR logs
+# USERS: create your own login. Generate the value with:   python core/password.py   (prints the field for a password you type)
+# then add (indented) under USERS:
+#   USERS
+#       youruser:<printed field>:0:

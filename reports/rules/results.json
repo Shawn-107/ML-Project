@@ -1,0 +1,31 @@
+{
+ "config": {
+  "window_s": 60.0,
+  "scan_min_targets": 41,
+  "arp_min": 63,
+  "dns_min": 109
+ },
+ "target_fpr": 0.01,
+ "units": "(source host, 60 s window) with at least one packet",
+ "held_out_windows": 205,
+ "held_out_false_alarm_rate": 0.00975609756097561,
+ "windows_flagged_before_minute_72": 0,
+ "attack_period_description_min80plus": {
+  "packets": 577753,
+  "distinct_senders": 24,
+  "top_sender": "192.168.2.110",
+  "top_sender_packet_share": 0.8855583614451158,
+  "flagged_hosts_and_windows": {
+   "192.168.2.109": 6,
+   "192.168.2.1": 17,
+   "192.168.2.110": 46
+  },
+  "share_of_packets_sent_by_flagged_hosts": 0.9133764774912463,
+  "top_sender_flagged": true,
+  "firings_by_rule": {
+   "arp_flood": 52,
+   "scan": 17
+  }
+ },
+ "note": "Minute >= 80 is chosen from the traffic profile, NOT ground-truth labels, and the host-level reading (which host is the scanner) is an inference from volume. No labelled recall is measured here. No blocklist data is bundled, so the blocklist rule was not exercised on this capture."
+}

@@ -1,0 +1,97 @@
+{
+  "policy": "fpr_3pct",
+  "false_alarm_target": 0.03,
+  "novelty_false_alarm_target": 0.05,
+  "ann_seeds_per_fold": 2,
+  "folds": {
+    "Analysis": {
+      "n_test_attack": 224,
+      "detect_classifier": 0.9955357142857143,
+      "detect_novelty": 0.7678571428571429,
+      "detect_combined": 1.0,
+      "false_alarm_classifier": 0.07536942634058205,
+      "false_alarm_combined": 0.14289862554042718,
+      "detect_when_seen": 0.9955357142857143
+    },
+    "Backdoor": {
+      "n_test_attack": 68,
+      "detect_classifier": 0.7647058823529411,
+      "detect_novelty": 0.39705882352941174,
+      "detect_combined": 0.7941176470588235,
+      "false_alarm_classifier": 0.0763050913079951,
+      "false_alarm_combined": 0.14651222817319481,
+      "detect_when_seen": 0.9117647058823529
+    },
+    "DoS": {
+      "n_test_attack": 1162,
+      "detect_classifier": 0.8209982788296041,
+      "detect_novelty": 0.5068846815834768,
+      "detect_combined": 0.8846815834767642,
+      "false_alarm_classifier": 0.07327224624120797,
+      "false_alarm_combined": 0.14693166419306963,
+      "detect_when_seen": 0.8726333907056799
+    },
+    "Exploits": {
+      "n_test_attack": 7048,
+      "detect_classifier": 0.7937003405221339,
+      "detect_novelty": 0.6173382519863791,
+      "detect_combined": 0.8917423382519863,
+      "false_alarm_classifier": 0.07617603407111054,
+      "false_alarm_combined": 0.15435245531393174,
+      "detect_when_seen": 0.9181328036322361
+    },
+    "Fuzzers": {
+      "n_test_attack": 3909,
+      "detect_classifier": 0.16167817856229214,
+      "detect_novelty": 0.1995395241749808,
+      "detect_combined": 0.31542594013814274,
+      "false_alarm_classifier": 0.09395366845195845,
+      "false_alarm_combined": 0.17209782538555848,
+      "detect_when_seen": 0.393451010488616
+    },
+    "Generic": {
+      "n_test_attack": 1220,
+      "detect_classifier": 0.6622950819672131,
+      "detect_novelty": 0.7868852459016393,
+      "detect_combined": 0.95,
+      "false_alarm_classifier": 0.07766019229528295,
+      "false_alarm_combined": 0.14909337291088598,
+      "detect_when_seen": 0.9377049180327869
+    },
+    "Reconnaissance": {
+      "n_test_attack": 1874,
+      "detect_classifier": 0.3473852721451441,
+      "detect_novelty": 0.15901814300960512,
+      "detect_combined": 0.3687299893276414,
+      "false_alarm_classifier": 0.07791830676905208,
+      "false_alarm_combined": 0.15319094018197071,
+      "detect_when_seen": 0.964247598719317
+    },
+    "Shellcode": {
+      "n_test_attack": 292,
+      "detect_classifier": 0.7397260273972602,
+      "detect_novelty": 0.09246575342465753,
+      "detect_combined": 0.75,
+      "false_alarm_classifier": 0.07607924114344712,
+      "false_alarm_combined": 0.14606052784409887,
+      "detect_when_seen": 0.7465753424657534
+    },
+    "Worms": {
+      "n_test_attack": 39,
+      "detect_classifier": 0.9230769230769231,
+      "detect_novelty": 0.6923076923076923,
+      "detect_combined": 0.9230769230769231,
+      "false_alarm_classifier": 0.07478866877460154,
+      "false_alarm_combined": 0.14522165580434923,
+      "detect_when_seen": 0.9230769230769231
+    }
+  },
+  "summary_mean_over_folds": {
+    "detect_classifier": 0.6899001887932474,
+    "detect_novelty": 0.4688172509749984,
+    "detect_combined": 0.7641971579255868,
+    "false_alarm_classifier": 0.07794698615502643,
+    "false_alarm_combined": 0.15070658837194298,
+    "detect_when_seen": 0.8514580452543756
+  }
+}
