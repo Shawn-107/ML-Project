@@ -9,7 +9,11 @@ Safety settings in `server.conf`: listens on 127.0.0.1 only, own random password
 no trail updates, no internet access from the server, no packet capture (this is the viewer only).
 
 What it shows: every `*.log` file in `logs/`, in Maltrail's event format.
-- 8 events: the real Maltrail sensor on the Mirai capture (sensor name `nids-maltrail-sensor`, reference `(heuristic)`).
-- Our alerts: written by `python -m layered_nids.pipeline.to_maltrail --alerts reports/pipeline/mirai.alerts.jsonl --out tools/maltrail_ui/logs`
+- 8 events: the real Maltrail sensor on the Mirai capture (sensor name `nids-sensor`, reference `(heuristic)`).
+- Our alerts: written by `python -m layered_nids.pipeline.to_dashboard --alerts reports/pipeline/mirai.alerts.jsonl --out tools/dashboard/logs`
   (sensor `nids`, reference `(nids)`). They are ML findings about a HOST, so ports are 0, destination 0.0.0.0 and the protocol column is a placeholder.
 - Both are from the unlabelled Mirai capture, dated 2018-10-25 (the capture's own date). Not live data.
+
+## CSV upload
+The "Upload CSV" button (top right) sends a UNSW-NB15, NetFlow v2 or Argus flow file to the CSV analyser (`nids_csv.py`, up to 100 MB, signed-in users only). It shows rows, flagged share, warnings and lets you download the scored file; flagged hosts are added to the event table (sensor `nids-csv`).
+Uploaded files are deleted after analysis; results stay in `uploads/` (ignored by git, pruned after 7 days).

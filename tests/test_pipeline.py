@@ -188,7 +188,7 @@ def test_live_kitsune_test_labels_only_the_planted_queries_and_measures_recall()
 
 
 def test_alerts_written_in_maltrail_format_read_back_through_our_own_maltrail_parser(tmp_path):
-    from layered_nids.pipeline.to_maltrail import alert_to_line, write_logs
+    from layered_nids.pipeline.to_dashboard import alert_to_line, write_logs
     a = {"host": "192.168.2.110", "ts": 1540450844.581, "probability": 0.9999999999, "severity": "high",
          "layers": {"packets": 0.9, "rules": 0.1}, "reasons": ['14 of 84 packets flagged in 60s "burst-aware"'], "setup": "x"}
     events, bad = parse_log(alert_to_line(a))

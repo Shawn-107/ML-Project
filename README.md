@@ -10,7 +10,7 @@ Final report: `reports/FINAL_REPORT.md`. Project brief and details: `CLAUDE.md` 
 - Tests: `python -m pytest tests`
 - Pipeline on a pcap: `python -m layered_nids.pipeline.run --pcap data/kitsune/mirai.pcap --maltrail`  (the Maltrail sensor runs in WSL2)
 - CSV flow files: `python -m layered_nids.csvmode FILE.csv`  (train the models first: `python -m layered_nids.csvmode.models train`)
-- Dashboard: `tools/maltrail_ui` (Maltrail's own web UI, localhost only; create your own `server.conf` from `server.conf.example`)
+- Dashboard: `tools/dashboard` (Maltrail's own web UI, localhost only; create your own `server.conf` from `server.conf.example`)
 
 ## Not in this repository (by design)
 - Datasets (UNSW-NB15, DGA lists, the Kitsune Mirai capture): see `data/SOURCES.md` for where to get them.

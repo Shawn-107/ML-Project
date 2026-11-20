@@ -24,10 +24,10 @@ legacy/models_backup_sklearn19/
 *.npz
 !tests/data/*.npz
 # dashboard: local password and config, live logs
-tools/maltrail_ui/PASSWORD.txt
-tools/maltrail_ui/server.conf
-tools/maltrail_ui/server.out
-tools/maltrail_ui/logs/
+tools/dashboard/PASSWORD.txt
+tools/dashboard/server.conf
+tools/dashboard/server.out
+tools/dashboard/logs/
 # captures, runtime logs, editor files
 *.pcap
 *.log
@@ -36,3 +36,7 @@ tools/maltrail_ui/logs/
 # third-party dataset copies and files derived from them (UNSW-NB15, Slips samples): get them from the sources in data/SOURCES.md
 legacy/nids_backend/data/*.csv
 reports/csv/*.csv
+
+# local only: credits and third-party licence texts (not published)
+credits/
+tools/dashboard/uploads/

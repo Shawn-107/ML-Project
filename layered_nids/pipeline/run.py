@@ -218,7 +218,7 @@ def main(argv=None):
     chosen_setup = "policy_all_layers" if "policy_all_layers" in setups else "kitsune_only"
     alerts_path = out_path.with_suffix(".alerts.jsonl")
     alerts_path.parent.mkdir(parents=True, exist_ok=True)
-    with alerts_path.open("w", encoding="utf-8") as f:                 # one alert per line; read by pipeline/to_maltrail.py
+    with alerts_path.open("w", encoding="utf-8") as f:                 # one alert per line; read by pipeline/to_dashboard.py
         for al in setups[chosen_setup]:
             f.write(json.dumps({"host": al.host, "ts": al.ts, "probability": al.probability, "severity": al.severity,
                                 "layers": al.layers, "reasons": list(al.reasons), "setup": chosen_setup}, default=float) + "\n")

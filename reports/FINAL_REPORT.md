@@ -9,7 +9,7 @@ A network intrusion detection system that combines evidence from several detecto
 - **Our ML layers:** DGA domain classifier, supervised flow classifiers (UNSW-NB15 34 features, NetFlow 40 features), and a learned alert combiner.
 - **Fusion:** per-host evidence over time windows (binomial and beta-binomial p-values, noisy-OR with decay), with a per-layer policy (signature hits alert directly; Kitsune and heuristics accumulate).
 - **Inputs:** pcap files (replay), CSV flow files (`layered_nids/csvmode`), and a limited live capture (Npcap, admin-only, one UAC prompt per capture).
-- **Output:** Maltrail's own web dashboard on localhost (`tools/maltrail_ui`), loaded with the real Maltrail events plus our alerts.
+- **Output:** Maltrail's own web dashboard on localhost (`tools/dashboard`), loaded with the real Maltrail events plus our alerts.
 
 Slips was studied (`reports/repo_evaluation.md`) but is not used: GPL, Linux/Docker only. No Slips code is in this project.
 

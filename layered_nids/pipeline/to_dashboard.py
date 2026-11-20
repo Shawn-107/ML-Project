@@ -1,6 +1,6 @@
 """Show our fused alerts in Maltrail's own web dashboard by writing them in Maltrail's event-log format.
 
-  python -m layered_nids.pipeline.to_maltrail --alerts reports/pipeline/mirai.alerts.jsonl --out tools/maltrail_ui/logs
+  python -m layered_nids.pipeline.to_dashboard --alerts reports/pipeline/mirai.alerts.jsonl --out tools/dashboard/logs
 
 Maltrail's log line:  "<time>" <sensor> <src_ip> <src_port> <dst_ip> <dst_port> <proto> <type> <trail> "<info>" <reference>
 Our alerts are machine-learning findings about a HOST, not network events, so some fields are placeholders: the source is the host, the

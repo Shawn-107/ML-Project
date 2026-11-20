@@ -1408,7 +1408,7 @@ def start_httpd(address=None, port=None, join=False, pem=None):
             # display helpers (_version, _logo, _assetver, _tzoffset, _statics, _format, _build_netfilters, _filter_events)
             # whose signature is NOT (self, params), so e.g. "GET /version" -> self._version(params) -> uncaught TypeError
             # (request crash) reachable by any client. Endpoints are an explicit allowlist, not "any _-prefixed method".
-            if splitpath[0] in ("login", "logout", "whoami", "check_ip", "check", "trails", "ping", "blacklist", "fail2ban", "events", "live", "counts", "geo", "hunt", "meta", "reference", "ripe", "ptr", "sensors"):
+            if splitpath[0] in ("login", "logout", "whoami", "check_ip", "check", "trails", "ping", "blacklist", "fail2ban", "events", "live", "counts", "geo", "hunt", "meta", "reference", "ripe", "ptr", "sensors", "nids"):
                 if len(splitpath) > 1:
                     params["subpath"] = splitpath[1]
                 content = getattr(self, "_%s" % splitpath[0])(params)
@@ -1558,6 +1558,8 @@ def start_httpd(address=None, port=None, join=False, pem=None):
                 length = int(self.headers.get(HTTP_HEADER.CONTENT_LENGTH) or 0)
             except (TypeError, ValueError):
                 length = 0
+            if self.path.split('?', 1)[0] == "/nids/csv/upload":     # NIDS addition: CSV upload (binary body, own size cap)
+                return self._nids_csv_upload(length)
             if length > MAX_POST_SIZE:  # NOTE: reject oversized bodies before buffering them
                 self.send_response(_http_client.REQUEST_ENTITY_TOO_LARGE)
                 self.send_header(HTTP_HEADER.CONNECTION, "close")
@@ -1950,6 +1952,55 @@ def start_httpd(address=None, port=None, join=False, pem=None):
             self.send_response(_http_client.FOUND)
             self.send_header(HTTP_HEADER.CONNECTION, "close")
             self.send_header(HTTP_HEADER.LOCATION, "/")
+
+        # ---- NIDS addition: CSV upload and result download (see nids_csv.py) -------------------------------------------
+        def _nids_json(self, code, obj):
+            body = json.dumps(obj).encode("utf8")
+            self.send_response(code)
+            self.send_header(HTTP_HEADER.CONNECTION, "close")
+            self.send_header(HTTP_HEADER.CONTENT_TYPE, "application/json")
+            self.send_header(HTTP_HEADER.CONTENT_LENGTH, str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _nids_csv_upload(self, length):
+            import nids_csv
+            session = self.get_session()
+            if session is None:
+                return self._nids_json(_http_client.UNAUTHORIZED, {"error": "sign in first"})
+            # a cross-site page cannot set this header without our permission (no CORS), so it blocks forged uploads
+            if self.headers.get("X-NIDS-Upload") != "1":
+                return self._nids_json(_http_client.FORBIDDEN, {"error": "missing upload header"})
+            if length <= 0 or length > nids_csv.MAX_BYTES:
+                return self._nids_json(_http_client.REQUEST_ENTITY_TOO_LARGE, {"error": "file is empty or larger than %d MB" % (nids_csv.MAX_BYTES // (1024 * 1024))})
+            raw = self.rfile.read(length)
+            name = _urllib.parse.unquote(self.headers.get("X-Filename") or "upload.csv")
+            policy = self.headers.get("X-Policy") or "fpr_3pct"
+            result = nids_csv.handle_upload(raw, name, policy, config.LOG_DIR or "logs")
+            return self._nids_json(_http_client.OK if "error" not in result else _http_client.BAD_REQUEST, result)
+
+        def _nids(self, params):
+            import nids_csv
+            session = self.get_session()
+            if session is None:
+                self.send_response(_http_client.UNAUTHORIZED)
+                self.send_header(HTTP_HEADER.CONNECTION, "close")
+                return None
+            if params.get("subpath") != "csv/download":
+                self.send_response(_http_client.NOT_FOUND)
+                self.send_header(HTTP_HEADER.CONNECTION, "close")
+                return None
+            found = nids_csv.result_file(params.get("id", ""), params.get("kind", ""))
+            if not found:
+                self.send_response(_http_client.NOT_FOUND)
+                self.send_header(HTTP_HEADER.CONNECTION, "close")
+                return None
+            path, name = found
+            self.send_response(_http_client.OK)
+            self.send_header(HTTP_HEADER.CONNECTION, "close")
+            self.send_header(HTTP_HEADER.CONTENT_TYPE, "text/csv; charset=utf-8")
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+            return path.read_text(encoding="utf-8", errors="replace")
 
         def _whoami(self, params):
             session = self.get_session()
