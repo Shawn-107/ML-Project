@@ -81,12 +81,14 @@ def _stats(alerts: list, events: list, bins: int = 48) -> dict:
     ts = [float(r.get("ts", 0)) for r in alerts] + [float(r.get("ts", 0)) for r in events]
     t0, t1 = (min(ts), max(ts)) if ts else (0.0, 0.0)
     width = max((t1 - t0) / bins, 1.0)
-    hist = [{"t0": t0 + i * width, "t1": t0 + (i + 1) * width, "critical": 0, "high": 0, "medium": 0, "low": 0, "events": 0} for i in range(bins)]
+    hist = [{"t0": t0 + i * width, "t1": t0 + (i + 1) * width, "critical": 0, "high": 0, "medium": 0, "low": 0, "events": 0, "signatures": 0} for i in range(bins)]
     for r in alerts:
         i = min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)
         hist[i][r.get("severity", "low") if r.get("severity") in SEVERITY_ORDER else "low"] += 1
     for r in events:
-        hist[min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)]["events"] += 1
+        b = hist[min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)]
+        b["events"] += 1
+        b["signatures"] += 1 if (r.get("detail") or {}).get("signature") else 0
     hosts: dict = {}
     for r in alerts:
         h = hosts.setdefault(r.get("host", "?"), {"host": r.get("host", "?"), "alerts": 0, "events": 0, "max_severity": "low", "last": 0.0})

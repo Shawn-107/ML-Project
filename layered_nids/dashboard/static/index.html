@@ -10,7 +10,7 @@
 <body>
 <header>
   <div class="brand">
-    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
     <div>NIDS<small>layered network intrusion detection</small></div>
   </div>
   <nav class="tabs" aria-label="sections">
@@ -20,7 +20,8 @@
     <a href="#/upload" data-v="upload">Upload</a>
   </nav>
   <span class="spacer"></span>
-  <span class="chip-status" id="status"><span class="dot"></span><span id="status-t">loading</span></span>
+  <button class="hbtn hide-m" id="kbtn" title="Search and commands">Search <kbd>Ctrl K</kbd></button>
+  <button class="hbtn live on" id="live" title="Refresh automatically when the data changes"><span class="pulse"></span><span id="live-t">Live</span></button>
   <a class="hbtn hide-s" href="/app/">Flow analysis &#8599;</a>
   <button class="hbtn" id="theme" title="Switch light or dark">Theme</button>
   <button class="hbtn" id="out">Sign out</button>
@@ -28,15 +29,19 @@
 
 <main>
   <section class="view" id="v-overview">
-    <h1>Overview</h1>
-    <p class="sub" id="range">What the detectors found in the loaded data.</p>
+    <div class="hero">
+      <div><h1>Network <span class="grad">overview</span></h1><p class="sub" id="range">What the detectors found in the loaded data.</p></div>
+      <div class="gauge" id="gauge"></div>
+    </div>
     <div class="kpis" id="kpis"></div>
     <div class="grid">
-      <div class="card span-8"><div class="card-h"><h2>Alerts over time</h2><span class="hint">UTC, by severity</span></div><div id="ch-time"></div><div class="legend" id="lg-time"></div></div>
-      <div class="card span-4"><div class="card-h"><h2>Severity</h2></div><div id="ch-sev" class="donut-wrap"></div></div>
-      <div class="card span-6"><div class="card-h"><h2>Busiest hosts</h2><span class="hint">click a host for its timeline</span></div><div id="ch-hosts" class="bars"></div></div>
-      <div class="card span-6"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of all alert weight</span></div><div id="ch-layers" class="bars"></div><div class="card-h" style="margin-top:20px"><h2>Rule events by rule</h2></div><div id="ch-rules" class="bars"></div></div>
-      <div class="card span-12" style="padding:0"><div class="card-h" style="padding:16px 18px 0"><h2>Latest alerts</h2><a href="#/alerts">View all</a></div><div class="table-wrap" style="max-height:none"><table id="t-latest"></table></div></div>
+      <div class="card span-8 rise" style="--i:4"><div class="card-h"><h2>Alerts over time</h2><span class="hint">UTC &middot; by severity &middot; hover for detail</span></div><div id="ch-time"></div><div class="legend" id="lg-time"></div></div>
+      <div class="card span-4 rise" style="--i:5"><div class="card-h"><h2>Severity</h2></div><div id="ch-sev" class="donut-wrap"></div></div>
+      <div class="card span-6 rise" style="--i:6"><div class="card-h"><h2>Host map</h2><span class="hint">size = alerts &middot; colour = worst severity &middot; click a host</span></div><div id="ch-map"></div></div>
+      <div class="card span-6 rise" style="--i:7"><div class="card-h"><h2>Busiest hosts</h2><span class="hint">alerts &middot; rule events</span></div><div id="ch-hosts" class="bars"></div></div>
+      <div class="card span-6 rise" style="--i:8"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of all alert weight</span></div><div id="ch-layers" class="bars"></div></div>
+      <div class="card span-6 rise" style="--i:9"><div class="card-h"><h2>Rule events by rule</h2><span class="hint">red = signature &middot; amber = heuristic</span></div><div id="ch-rules" class="bars"></div></div>
+      <div class="card span-12 rise" style="--i:10;padding:0"><div class="card-h" style="padding:16px 20px 0"><h2>Latest alerts</h2><a href="#/alerts">View all</a></div><div class="table-wrap" style="max-height:none"><table id="t-latest"></table></div></div>
     </div>
   </section>
 
@@ -44,7 +49,7 @@
     <h1>Alerts</h1><p class="sub">One line per host and time window where the evidence added up. Click a row for the host's timeline.</p>
     <div class="card" style="padding:0">
       <div class="toolbar">
-        <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="aq" placeholder="Search host or reason" aria-label="search alerts"></div>
+        <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="aq" placeholder="Search host or reason  ( / )" aria-label="search alerts"></div>
         <div class="seg" id="asev" role="group" aria-label="severity"><button data-s="" class="on">All</button><button data-s="critical">Critical</button><button data-s="high">High</button><button data-s="medium">Medium</button><button data-s="low">Low</button></div>
         <span class="count" id="acount"></span>
       </div>
@@ -84,6 +89,12 @@
   <div class="drawer-h"><h2 id="d-title"></h2><span id="d-sev"></span><button class="xbtn" id="d-close" aria-label="close">&times;</button></div>
   <div class="drawer-b" id="d-body"></div>
 </aside>
+<div class="palette" id="palette" role="dialog" aria-label="command palette" aria-hidden="true">
+  <input id="pin" placeholder="Jump to a page, a host address, or run a command" autocomplete="off" aria-label="command">
+  <ul id="plist"></ul>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>
