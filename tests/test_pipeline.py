@@ -6,12 +6,11 @@ import pytest
 
 from layered_nids.common.schema import Evidence
 from layered_nids.packets.pcap import Packet
-from layered_nids.pipeline.kitsune_layer import calibrate_cutoff, internal_host, kitsune_evidence, score_packets
-from layered_nids.pipeline.maltrail_layer import HEURISTIC_SCORE, TRAIL_SCORE, events_to_evidence, parse_log
+from layered_nids.pipeline.packet_layer import calibrate_cutoff, internal_host, packet_evidence, score_packets
 from layered_nids.pipeline.run import describe, find_jump, fuse
 
-HEUR = '"2018-10-25 05:48:11.704154" mtlab 192.168.2.112 59290 61.188.37.216 8000 TCP IPORT 61.188.37.216:8000 "potential periodic beaconing (suspicious)" (heuristic)'
-TRAIL = '"2018-10-25 05:50:00.000000" mtlab 10.0.0.66 40000 66.66.66.66 80 TCP IP 66.66.66.66 "malware (test)" (static)'
+HEUR_EV = Evidence("rules", "192.168.2.112", 1540446491.7, 0.6, "periodic connections", {"signature": False, "trail": "beaconing"})
+SIG_EV = Evidence("rules", "10.0.0.66", 1540446600.0, 0.8, "blocklisted address", {"signature": True, "trail": "66.66.66.66"})
 
 
 def pkt(src="10.0.0.1", dst="10.0.0.2", proto="tcp", sport=1234, dport=80, ts=1.0, size=100):
@@ -31,18 +30,17 @@ def test_internal_host_picks_the_real_internal_end_or_nothing():
 
 
 def test_hosts_without_an_internal_end_take_no_part_in_evidence():
-    from layered_nids.pipeline.kitsune_layer import kitsune_evidence
     n = 200
     data = {"scores": np.r_[np.zeros(50), np.ones(150) * 9.0], "ts": np.arange(n) * 0.1,
             "hosts": np.array(["192.168.2.5"] * 100 + [""] * 100)}
-    ev = kitsune_evidence(data, cutoff=1.0, first_index=50, fpr=0.01, window_s=60.0)
+    ev = packet_evidence(data, cutoff=1.0, first_index=50, fpr=0.01, window_s=60.0)
     assert {e.host for e in ev} == {"192.168.2.5"} and ev[0].detail["events"] == 50           # the 100 host-less packets are not counted
 
 
 def stream(n_normal=5000, n_flood=600, seed=0):
     """Stationary random normal traffic (random hosts, ports, sizes, exponential gaps), then a flood from one host.
-    Regular arithmetic patterns are avoided on purpose: Kitsune's running counters drift on them and 'normal' scores creep up.
-    The normal part lasts ~500 s because Kitsune's slowest windows are ~100 s long and need time to settle."""
+    Regular arithmetic patterns are avoided on purpose: running counters drift on them and 'normal' scores creep up.
+    The normal part lasts ~500 s because the slowest statistics windows are ~100 s long and need time to settle."""
     rng = np.random.default_rng(seed)
     out, t = [], 0.0
     for _ in range(n_normal):
@@ -56,13 +54,13 @@ def stream(n_normal=5000, n_flood=600, seed=0):
 
 
 def test_score_calibrate_and_evidence_flag_the_flood_host_only():
-    data = score_packets(stream(), fm_grace=300, ad_grace=1500)
+    data = score_packets(stream(), train_n=1800)
     s = data["scores"]
-    assert (s[:1801] == 0).all() and (s[1801:] > 0).all()
-    cutoff, first = calibrate_cutoff(s, 300, 1500, 1500, 0.01)
-    assert first == 1801 + 1500
-    assert (s[1801:first] >= cutoff).mean() <= 0.011                               # cut-off honours the target on its own window
-    ev = kitsune_evidence(data, cutoff, first, 0.01, window_s=60.0, min_score=0.5)
+    assert (s[:1800] == 0).all() and (s[1800:] > 0).all()
+    cutoff, first = calibrate_cutoff(s, 1800, 1500, 0.01)
+    assert first == 1800 + 1500
+    assert (s[1800:first] >= cutoff).mean() <= 0.011                               # cut-off honours the target on its own window
+    ev = packet_evidence(data, cutoff, first, 0.01, window_s=60.0, min_score=0.5)
     assert all(e.layer == "packets" for e in ev)
     ratio = lambda e: e.detail["flagged"] / e.detail["events"]
     flood = [e for e in ev if e.host == "10.0.0.66"]
@@ -75,25 +73,7 @@ def test_score_calibrate_and_evidence_flag_the_flood_host_only():
 
 def test_calibration_needs_enough_packets():
     with pytest.raises(ValueError):
-        calibrate_cutoff(np.zeros(300), 100, 100, 50, 0.01)
-
-
-def test_parse_log_reads_real_maltrail_lines_and_counts_bad_ones():
-    events, bad = parse_log("\n".join([HEUR, "", "garbage line", TRAIL, '"bad time" a b c d e f g h "i" j']))
-    assert len(events) == 2 and bad == 2
-    assert events[0]["src"] == "192.168.2.112" and events[0]["ref"] == "(heuristic)" and events[0]["dport"] == "8000"
-    assert events[0]["ts"] < events[1]["ts"]
-    assert events[1]["info"] == "malware (test)" and events[1]["trail"] == "66.66.66.66"
-
-
-def test_events_to_evidence_scores_hosts_and_reasons():
-    ev = events_to_evidence(parse_log(HEUR + "\n" + TRAIL)[0])
-    assert [e.score for e in ev] == [HEURISTIC_SCORE, TRAIL_SCORE] and all(e.layer == "rules" for e in ev)
-    assert ev[0].host == "192.168.2.112" and "periodic beaconing" in ev[0].reason and ev[1].host == "10.0.0.66"
-    inbound = parse_log('"2018-10-25 05:50:00.000000" mtlab 8.8.4.4 53 192.168.2.7 4444 UDP IP 8.8.4.4 "x (test)" (static)')[0]
-    assert events_to_evidence(inbound)[0].host == "192.168.2.7"                     # the private end is the host
-    external = parse_log('"2018-10-25 05:50:00.000000" mtlab 8.8.4.4 53 1.1.1.1 4444 UDP IP 8.8.4.4 "x (test)" (static)')[0]
-    assert events_to_evidence(external) == []                                        # no internal end: skipped, like the Kitsune layer
+        calibrate_cutoff(np.zeros(300), 100, 50, 0.01)
 
 
 def test_find_jump_marks_where_scores_stay_high():
@@ -120,7 +100,7 @@ def test_alert_threshold_tuning_ignores_one_off_bursts_and_keeps_persistent_atta
 
 def test_fusion_needs_both_layers_when_asked_and_describe_splits_at_the_jump():
     k = [Evidence("packets", "h1", 100.0 + i, 0.97, "odd packets") for i in range(3)]
-    m = [Evidence("rules", "h1", 105.0, 0.95, "Maltrail: x"), Evidence("rules", "h2", 105.0, 0.95, "Maltrail: x")]
+    m = [Evidence("rules", "h1", 105.0, 0.95, "rule: x"), Evidence("rules", "h2", 105.0, 0.95, "rule: x")]
     both = fuse(k + m, alert_p=0.99, min_layers=2)
     assert {a.host for a in both} == {"h1"} and set(both[0].layers) == {"packets", "rules"}
     assert not fuse(m, alert_p=0.99, min_layers=2)                                   # one layer alone cannot satisfy it
@@ -130,7 +110,7 @@ def test_fusion_needs_both_layers_when_asked_and_describe_splits_at_the_jump():
 
 def test_signature_hits_alert_alone_but_heuristics_only_corroborate():
     from layered_nids.pipeline.run import fuse_policy, is_signature
-    ev_rules = events_to_evidence(parse_log(HEUR + "\n" + TRAIL)[0])
+    ev_rules = [HEUR_EV, SIG_EV]
     assert [is_signature(e) for e in ev_rules] == [False, True]                      # heuristic vs blocklist hit
     strict = 1 - 1e-12
     alerts = fuse_policy([], ev_rules, strict)
@@ -143,8 +123,7 @@ def test_signature_hits_alert_alone_but_heuristics_only_corroborate():
 
 def test_cooldown_stops_the_same_signature_alerting_every_second():
     from layered_nids.pipeline.run import fuse_policy
-    lines = "\n".join(f'"2018-10-25 05:50:{s:02d}.000000" mtlab 10.0.0.66 40000 66.66.66.66 80 TCP IP 66.66.66.66 "malware (test)" (static)' for s in range(10))
-    ev = events_to_evidence(parse_log(lines)[0])
+    ev = [Evidence("rules", "10.0.0.66", 1540446600.0 + k, 0.8, "blocklisted address", {"signature": True, "trail": "66.66.66.66"}) for k in range(10)]
     assert len(fuse_policy([], ev, 0.99, cooldown_s=300.0)) == 1                      # ten identical hits in 10 s -> one alert
     assert len(fuse_policy([], ev, 0.99, cooldown_s=1.0)) == 10                       # hits are 1 s apart: a 1 s cooldown lets all through
 
@@ -174,8 +153,8 @@ def test_live_capture_adapter_limits_paths_and_writes_a_readable_pcap(tmp_path, 
     assert len(pk) == 25 and pk[0].src == "192.168.2.5" and pk[0].dport == 443 and pk[0].proto == "tcp"
 
 
-def test_live_kitsune_test_labels_only_the_planted_queries_and_measures_recall():
-    from layered_nids.pipeline.live_kitsune_test import analyse, is_planted_query, planted_name
+def test_live_packet_test_labels_only_the_planted_queries_and_measures_recall():
+    from layered_nids.pipeline.live_packet_test import analyse, is_planted_query, planted_name
     name = planted_name()
     assert name.startswith("kt") and name.endswith(".example.com") and len(name) == 2 + 10 + len(".example.com")
     mk = lambda q, ts: Packet(ts, 80, "a", "b", "192.168.2.5", "8.8.8.8", "udp", 5353, 53, q)
@@ -187,18 +166,7 @@ def test_live_kitsune_test_labels_only_the_planted_queries_and_measures_recall()
     assert res["other_packets_scored"] == 99 and res["other_flagged_rate"] == 0.0               # 100 minus the packet at t=99 inside the window margin; none flagged
 
 
-def test_alerts_written_in_maltrail_format_read_back_through_our_own_maltrail_parser(tmp_path):
-    from layered_nids.pipeline.to_dashboard import alert_to_line, write_logs
-    a = {"host": "192.168.2.110", "ts": 1540450844.581, "probability": 0.9999999999, "severity": "high",
-         "layers": {"packets": 0.9, "rules": 0.1}, "reasons": ['14 of 84 packets flagged in 60s "burst-aware"'], "setup": "x"}
-    events, bad = parse_log(alert_to_line(a))
-    assert bad == 0 and len(events) == 1
-    e = events[0]
-    assert e["src"] == "192.168.2.110" and e["ref"] == "(nids)" and e["sensor"] == "nids" and "high ML alert (packets+rules)" in e["info"]
-    ev = events_to_evidence(events)[0]
-    assert ev.host == "192.168.2.110" and ev.layer == "rules"                          # a reader of Maltrail logs sees it as a normal event
-    src = tmp_path / "alerts.jsonl"
-    src.write_text(json.dumps(a) + "\n" + json.dumps(dict(a, ts=a["ts"] + 86400 * 2)) + "\n")
-    written = write_logs(src, tmp_path / "logs")
-    assert sorted(written) == ["2018-10-25.log", "2018-10-27.log"] and all(v == 1 for v in written.values())
-    assert (tmp_path / "logs" / "2018-10-25.log").read_text().count("\n") == 1
+def test_rules_adapter_marks_signature_hits_and_drops_hosts_without_an_internal_end():
+    from layered_nids.pipeline.rules_layer import is_signature
+    assert [is_signature(e) for e in (HEUR_EV, SIG_EV)] == [False, True]
+    assert not is_signature(Evidence("packets", "h", 1.0, 0.9, "x", {"signature": True}))      # only the rules layer has signatures

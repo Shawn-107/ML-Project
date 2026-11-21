@@ -5,13 +5,12 @@
 What it does, in order:
   1. captures your own traffic for a few seconds into data/live (Windows asks for approval: click Yes only if you started this);
   2. while capturing, sends ONE harmless HTTP request to example.com (IANA's public test domain) whose path looks like a directory
-     traversal, with the made-up Host header trav.example (Maltrail whitelists example.com, so it would ignore that name; trav.example is
-     what Maltrail's own test uses). Maltrail has a heuristic for exactly that pattern, so there is a known answer;
+     traversal, with the made-up Host header trav.example. Our rules layer has a signature for exactly that pattern, so there is a known answer;
   3. checks that the capture really contains that request (searches the saved bytes; nothing else is printed from the capture);
-  4. runs the real Maltrail sensor (WSL2) on the saved file and looks for the traversal finding;
+  4. runs our rules layer on the saved file and looks for the traversal finding;
   5. deletes the capture unless --keep is given.
-Only counts and the planted finding are printed. It proves the capture path, our packet parser and the sensor work on real packets.
-It does NOT prove detection accuracy and it does not exercise Kitsune (which needs tens of thousands of clean packets to learn).
+Only counts and the planted finding are printed. It proves the capture path, our packet parser and the rules layer work on real packets.
+It does NOT prove detection accuracy and it does not exercise the packet detector (which needs tens of thousands of clean packets to learn).
 """
 from __future__ import annotations
 
@@ -24,11 +23,11 @@ from pathlib import Path
 
 from layered_nids.packets.pcap import iter_packets
 from layered_nids.pipeline.live import LIVE_DIR, capture_to_pcap
-from layered_nids.pipeline.maltrail_layer import events_to_evidence, parse_log, run_sensor_wsl
+from layered_nids.pipeline.rules_layer import rules_evidence
 
-PLANTED_PATH = "/download?file=../../../../etc/passwd"           # Maltrail's own directory-traversal test pattern
+PLANTED_PATH = "/download?file=../../../../etc/passwd"           # a classic directory-traversal request
 HOST = "example.com"                                             # where the request is sent (IANA's public test domain)
-HOST_HEADER = "trav.example"                                     # the Host header: Maltrail whitelists example.com itself, so it would ignore it
+HOST_HEADER = "trav.example"                                     # the Host header of the planted request
 
 
 def send_planted_request() -> dict:
@@ -79,15 +78,14 @@ def main(argv=None):
         print(f"our parser reads {n_parsed:,} packets back (match: {ok_parse}); planted request present in the capture: {ok_req}", flush=True)
         if result["packets"] < 20:
             print("(very few packets: check that the right network interface was used)", flush=True)
-        events, bad = parse_log(run_sensor_wsl(path))
-        trav = [e for e in events if "traversal" in e["info"].lower()]
-        print(f"Maltrail sensor on the saved capture: {len(events)} events total ({bad} unparsed); "
-              f"{len(trav)} directory-traversal finding(s)", flush=True)
+        ev = rules_evidence(iter_packets(path))
+        trav = [e for e in ev if "traversal" in (e.reason + str(e.detail.get("trail", ""))).lower()]
+        print(f"rules layer on the saved capture: {len(ev)} evidence items total; {len(trav)} directory-traversal finding(s)", flush=True)
         for e in trav[:2]:
-            print(f'   finding: "{e["info"]}" ({e["ref"]}) - internal host attributed: {events_to_evidence([e])[0].host if events_to_evidence([e]) else "none"}', flush=True)
-        others = sorted({e["info"] for e in events if "traversal" not in e["info"].lower()})
+            print(f'   finding: "{e.reason}" - internal host attributed: {e.host}', flush=True)
+        others = sorted({e.reason[:60] for e in ev if e not in trav})
         if others:
-            print(f"   other finding types on your real traffic: {others[:5]}", flush=True)
+            print(f"   other findings on your real traffic: {others[:5]}", flush=True)
         verdict = bool(sent) and ok_parse and ok_req and len(trav) >= 1
     finally:
         if not a.keep:
@@ -95,7 +93,7 @@ def main(argv=None):
             print("capture file deleted", flush=True)
         else:
             print(f"capture kept (contains your traffic): {path}", flush=True)
-    print("RESULT:", "PASS: real capture -> parser -> real Maltrail sensor flagged the planted request" if verdict else
+    print("RESULT:", "PASS: real capture -> parser -> rules layer flagged the planted request" if verdict else
           "FAIL or INCOMPLETE: see the lines above", flush=True)
     return 0 if verdict else 1
 

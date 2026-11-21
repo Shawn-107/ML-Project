@@ -1,14 +1,13 @@
-"""Combined pipeline on a pcap: real Kitsune + real Maltrail -> per-host evidence -> fused alerts.
+"""Combined pipeline on a pcap: our packet detector + our rules -> per-host evidence -> fused alerts.
 
-  python -m layered_nids.pipeline.run --pcap data/kitsune/mirai.pcap --maltrail
+  python -m layered_nids.pipeline.run --pcap data/kitsune/mirai.pcap --rules
 
-Kitsune scores are cached (pure Python is slow); the Maltrail sensor runs in WSL2 (--maltrail) or its log is read from a
-file (--maltrail-log). Output: reports/pipeline/<name>.json. The capture is UNLABELLED, so the report is DESCRIPTIVE:
-it shows what each layer and the fusion say and when, not detection rates.
+Packet scores are cached. Output: reports/pipeline/<name>.json and <name>.alerts.jsonl. The capture is UNLABELLED, so the report
+is DESCRIPTIVE: it shows what each layer and the fusion say and when, not detection rates.
 
 Alert policy (per layer, because one threshold for every layer silences the weak ones):
-  - Maltrail SIGNATURE hits (blocklist matches) are precise, so each one alerts on its own;
-  - Kitsune anomalies and Maltrail HEURISTICS accumulate per host, and alert when the accumulated evidence passes a threshold
+  - rule SIGNATURE hits (patterns, blocklist matches) are precise, so each one alerts on its own;
+  - packet anomalies and rule HEURISTICS accumulate per host, and alert when the accumulated evidence passes a threshold
     that is tuned on the first half of the assumed-normal stretch and checked on the second half;
   - evidence uses a burst-aware null fitted on normal windows (default) or the plain binomial null (--null binomial).
 """
@@ -22,17 +21,18 @@ from pathlib import Path
 import numpy as np
 
 from layered_nids.common.paths import REPORTS
+from layered_nids.packets.pcap import iter_packets
 from layered_nids.common.schema import Evidence
 from layered_nids.fusion.accumulator import Alert, EvidenceAccumulator, FusionConfig
-from layered_nids.pipeline.kitsune_layer import calibrate_cutoff, fit_null, kitsune_evidence, score_pcap
-from layered_nids.pipeline.maltrail_layer import events_to_evidence, parse_log, run_sensor_wsl
+from layered_nids.pipeline.packet_layer import DEFAULT_TRAIN, calibrate_cutoff, fit_null, packet_evidence, score_pcap
+from layered_nids.pipeline.rules_layer import is_signature, rules_evidence
 
 ALERT_P_GRID = [1 - 10 ** -k for k in (2, 3, 4, 5, 6, 7, 8, 9, 10, 12)]       # least to most strict
 
 
 def find_jump(scores, cutoff: float, start: int, window: int = 2000):
     """First index after `start` where more than half of the next `window` packets are at or above the cut-off, else None.
-    Descriptive only: it marks where the traffic first looks unlike what Kitsune learned, not a labelled attack start."""
+    Descriptive only: it marks where the traffic first looks unlike what the detector learned, not a labelled attack start."""
     flags = (np.asarray(scores[start:]) >= cutoff).astype(float)
     if len(flags) < window:
         return None
@@ -46,13 +46,8 @@ def fuse(evidence, alert_p: float, min_layers: int = 1, half_life_s: float = 300
     return EvidenceAccumulator(cfg).run(evidence)
 
 
-def is_signature(e: Evidence) -> bool:
-    """A Maltrail blocklist (trail) hit, as opposed to a heuristic finding."""
-    return e.layer == "rules" and "(heuristic)" not in str(e.detail.get("ref", ""))
-
-
 def fuse_policy(ev_packets, ev_rules, alert_p: float, cooldown_s: float = 300.0) -> list[Alert]:
-    """Per-layer policy: signature hits alert directly (once per host and trail per cooldown); Kitsune anomalies and Maltrail
+    """Per-layer policy: signature hits alert directly (once per host and trail per cooldown); packet anomalies and rule
     heuristics accumulate together per host and alert at alert_p. Heuristics can corroborate an anomaly but cannot alert alone
     once the threshold is strict."""
     direct, last = [], {}
@@ -101,10 +96,10 @@ def tune(data, cutoff, first, fpr, window_s, t_first, t_mid, jump_ts, method, sw
     tune_seg, held_seg = ((t_mid, jump_ts), (t_first, t_mid)) if swapped else ((t_first, t_mid), (t_mid, jump_ts))
     if method == "burst":
         mu, rho, nwin = fit_null(data, cutoff, first, *tune_seg, window_s)
-        ev = kitsune_evidence(data, cutoff, first, mu, window_s, rho=rho)
+        ev = packet_evidence(data, cutoff, first, mu, window_s, rho=rho)
         null = {"mu": round(mu, 5), "rho": round(rho, 4), "windows_used": nwin}
     else:
-        ev = kitsune_evidence(data, cutoff, first, fpr, window_s)
+        ev = packet_evidence(data, cutoff, first, fpr, window_s)
         null = {"mu": fpr, "rho": 0.0}
     bounds = {"tuning_half": tune_seg, "heldout_normal_half": held_seg, "after_jump": (jump_ts, float("inf"))}
     rows = alert_curve(ev, bounds)
@@ -132,12 +127,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--pcap", required=True)
     ap.add_argument("--name", default=None, help="report name (default: pcap file name)")
-    ap.add_argument("--maltrail", action="store_true", help="run the real Maltrail sensor in WSL2 on the pcap")
-    ap.add_argument("--maltrail-log", default=None, help="use an existing Maltrail event log instead")
-    ap.add_argument("--cache", default=None, help="Kitsune scores cache (.npz); default reports/pipeline/<name>_kitsune_scores.npz")
+    ap.add_argument("--rules", action="store_true", help="also run the rules layer (signatures and heuristics) on the packets")
+    ap.add_argument("--cache", default=None, help="packet scores cache (.npz); default reports/pipeline/<name>_packet_scores.npz")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--fm", type=int, default=5000)
-    ap.add_argument("--ad", type=int, default=50000)
+    ap.add_argument("--train", type=int, default=DEFAULT_TRAIN, help="packets the detector learns from (must be clean traffic)")
     ap.add_argument("--calibration", type=int, default=15000, help="packets after training used to set the cut-off (assumed normal)")
     ap.add_argument("--fpr", type=float, default=0.01, help="target per-packet false-alarm rate for the cut-off (and the binomial null)")
     ap.add_argument("--window", type=float, default=60.0, help="evidence window in seconds")
@@ -148,27 +141,25 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     name = a.name or Path(a.pcap).stem
-    cache = a.cache or str(REPORTS / "pipeline" / f"{name}_kitsune_scores.npz")
+    cache = a.cache or str(REPORTS / "pipeline" / f"{name}_packet_scores.npz")
     out_path = Path(a.out or REPORTS / "pipeline" / f"{name}.json")
 
-    data = score_pcap(a.pcap, cache, a.fm, a.ad, a.limit)
+    data = score_pcap(a.pcap, cache, a.train, a.limit)
     n = len(data["scores"])
-    cutoff, first = calibrate_cutoff(data["scores"], a.fm, a.ad, a.calibration, a.fpr)
+    cutoff, first = calibrate_cutoff(data["scores"], a.train, a.calibration, a.fpr)
     t0 = float(data["ts"][0])
     jump = find_jump(data["scores"], cutoff, first)
     jump_ts = float(data["ts"][jump]) if jump is not None else None
-    print(f"packets {n:,} | trained on {a.fm + a.ad:,} | calibrated on next {first - a.fm - a.ad - 1:,} -> cut-off {cutoff:.4f}"
+    print(f"packets {n:,} | trained on {a.train:,} | calibrated on next {first - a.train:,} -> cut-off {cutoff:.4f}"
           f" | scoring from packet {first:,}", flush=True)
     if jump is not None:
-        print(f"Kitsune scores jump at packet {jump:,} = minute {(jump_ts - t0) / 60:.1f} of the capture", flush=True)
+        print(f"packet scores jump at packet {jump:,} = minute {(jump_ts - t0) / 60:.1f} of the capture", flush=True)
 
-    ev_m, bad = [], 0
-    if a.maltrail or a.maltrail_log:
-        text = Path(a.maltrail_log).read_text(encoding="utf-8", errors="ignore") if a.maltrail_log else run_sensor_wsl(a.pcap)
-        events, bad = parse_log(text)
-        ev_m = events_to_evidence(events)
-        print(f"Maltrail events: {len(events)} -> evidence for internal hosts: {len(ev_m)} "
-              f"(signature hits {sum(is_signature(e) for e in ev_m)}, heuristics {sum(not is_signature(e) for e in ev_m)}; unparsed lines: {bad})", flush=True)
+    ev_m = []
+    if a.rules:
+        ev_m = rules_evidence(iter_packets(a.pcap, a.limit))
+        print(f"rules: {len(ev_m)} evidence items for internal hosts "
+              f"(signature hits {sum(is_signature(e) for e in ev_m)}, heuristics {sum(not is_signature(e) for e in ev_m)})", flush=True)
 
     tuning, alert_p, ev_k = None, a.alert_p, None
     if jump_ts is not None:
@@ -195,27 +186,27 @@ def main(argv=None):
     else:
         print("no jump found: no assumed-normal stretch to tune on; using alert_p 0.99 and the binomial null", flush=True)
         alert_p = alert_p or 0.99
-        ev_k = kitsune_evidence(data, cutoff, first, a.fpr, a.window)
+        ev_k = packet_evidence(data, cutoff, first, a.fpr, a.window)
     print(f"\nusing alert_p {alert_p:.12f} with the {a.null if jump_ts is not None else 'binomial'} null", flush=True)
 
-    setups = {"kitsune_only": fuse(ev_k, alert_p)}
-    if a.maltrail or a.maltrail_log:
-        setups["maltrail_signature_hits_direct"] = fuse_policy([], [e for e in ev_m if is_signature(e)], alert_p)
-        setups["maltrail_heuristics_alone"] = fuse([e for e in ev_m if not is_signature(e)], alert_p)
+    setups = {"packets_only": fuse(ev_k, alert_p)}
+    if a.rules:
+        setups["rules_signature_hits_direct"] = fuse_policy([], [e for e in ev_m if is_signature(e)], alert_p)
+        setups["rules_heuristics_alone"] = fuse([e for e in ev_m if not is_signature(e)], alert_p)
         setups["policy_all_layers"] = fuse_policy(ev_k, ev_m, alert_p)
-        setups["need_kitsune_and_maltrail"] = fuse(ev_k + ev_m, alert_p, min_layers=2)
+        setups["need_packets_and_rules"] = fuse(ev_k + ev_m, alert_p, min_layers=2)
     report = {"pcap": str(a.pcap), "packets": n, "settings": {k: v for k, v in vars(a).items() if k != "pcap"},
               "alert_p_used": alert_p, "tuning": tuning,
-              "kitsune": {"cutoff": cutoff, "scoring_from_packet": first, "jump_packet": jump,
+              "packet_detector": {"cutoff": cutoff, "scoring_from_packet": first, "jump_packet": jump,
                           "jump_minute": None if jump is None else round((jump_ts - t0) / 60, 1), "evidence_windows": len(ev_k),
                           "cache_used": bool(data.get("cached"))},
-              "maltrail": {"events_for_internal_hosts": len(ev_m), "unparsed_lines": bad,
+              "rules": {"evidence_items": len(ev_m),
                            "signature_hits": sum(is_signature(e) for e in ev_m),
                            "first_event_minutes": sorted({round((e.ts - t0) / 60, 1) for e in ev_m})[:10]},
-              "setups": {}, "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where Kitsune's "
+              "setups": {}, "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where the packet detector's "
                                     "scores stay above its cut-off; it is not a labelled attack start. No recall or false-alarm rate is measured."}
     print("", flush=True)
-    chosen_setup = "policy_all_layers" if "policy_all_layers" in setups else "kitsune_only"
+    chosen_setup = "policy_all_layers" if "policy_all_layers" in setups else "packets_only"
     alerts_path = out_path.with_suffix(".alerts.jsonl")
     alerts_path.parent.mkdir(parents=True, exist_ok=True)
     with alerts_path.open("w", encoding="utf-8") as f:                 # one alert per line; read by pipeline/to_dashboard.py

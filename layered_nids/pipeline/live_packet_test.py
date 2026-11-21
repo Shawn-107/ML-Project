@@ -1,16 +1,16 @@
-"""Long live test of Kitsune on YOUR real traffic, with a planted anomaly that gives known answers.
+"""Long live test of our packet detector on YOUR real traffic, with a planted anomaly that gives known answers.
 
-  python -m layered_nids.pipeline.live_kitsune_test --minutes 60 --plant-at 50
+  python -m layered_nids.pipeline.live_packet_test --minutes 60 --plant-at 50
 
   1. captures your own traffic for --minutes (one Windows approval prompt at the start; use the laptop normally);
   2. at minute --plant-at it sends a short burst of DNS lookups for random names under example.com (400 lookups, about 20 per second):
      harmless, but unlike normal browsing. Our parser reads DNS query names, so those query packets are KNOWN anomalous packets;
-  3. afterwards Kitsune (reduced learning windows, see below) scores the capture; we report how many of the planted query packets
-     score above the cut-off, versus how many other packets do (the false-alarm rate), plus what Maltrail's real sensor says;
+  3. afterwards the detector (reduced learning window, see below) scores the capture; we report how many of the planted query packets
+     score above the cut-off, versus how many other packets do (the false-alarm rate), plus what our rules layer says;
   4. deletes the capture unless --keep (it contains your traffic).
 
-Reduced learning: Kitsune's defaults need ~70,000 packets (55,000 to learn + 15,000 to calibrate); a quiet laptop makes 10-50 packets/s, so the
-defaults may never finish in an hour. This test uses fm=2000, ad=20000, calibration=5000. Learning on fewer packets is LESS reliable; the
+Reduced learning: the defaults need ~70,000 packets (55,000 to learn + 15,000 to calibrate); a quiet laptop makes 10-50 packets/s, so the
+defaults may never finish in an hour. This test uses train=22000, calibration=5000. Learning on fewer packets is LESS reliable; the
 result is a feasibility check, not a benchmark. Only aggregate numbers are printed from the capture.
 """
 from __future__ import annotations
@@ -28,9 +28,9 @@ import numpy as np
 
 from layered_nids.common.paths import REPORTS
 from layered_nids.packets.pcap import iter_packets
-from layered_nids.pipeline.kitsune_layer import calibrate_cutoff, score_packets
+from layered_nids.pipeline.packet_layer import calibrate_cutoff, score_packets
 from layered_nids.pipeline.live import LIVE_DIR, MAX_SECONDS, capture_to_pcap
-from layered_nids.pipeline.maltrail_layer import parse_log, run_sensor_wsl
+from layered_nids.pipeline.rules_layer import rules_evidence
 
 PLANT_SUFFIX = ".example.com"
 PLANT_PREFIX = "kt"
@@ -80,17 +80,16 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=60.0)
     ap.add_argument("--plant-at", type=float, default=50.0, help="minute at which the planted burst is sent")
-    ap.add_argument("--fm", type=int, default=2000)
-    ap.add_argument("--ad", type=int, default=20000)
+    ap.add_argument("--train", type=int, default=22000)
     ap.add_argument("--calibration", type=int, default=5000)
     ap.add_argument("--fpr", type=float, default=0.01)
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--out", default=str(REPORTS / "pipeline" / "live_kitsune_test.json"))
+    ap.add_argument("--out", default=str(REPORTS / "pipeline" / "live_packet_test.json"))
     a = ap.parse_args(argv)
     seconds = a.minutes * 60.0
     if seconds > MAX_SECONDS or a.plant_at * 60.0 >= seconds:
         raise SystemExit(f"--minutes must be at most {MAX_SECONDS // 60} and --plant-at must be earlier than the end")
-    path = LIVE_DIR / time.strftime("kitsune_live_%Y%m%d_%H%M%S.pcap")
+    path = LIVE_DIR / time.strftime("packet_live_%Y%m%d_%H%M%S.pcap")
     result: dict = {}
     started = threading.Event()
     t = threading.Thread(target=lambda: result.update(capture_to_pcap(path, seconds, 3_000_000, on_started=started.set)), daemon=True)
@@ -115,27 +114,28 @@ def main(argv=None):
     print(f"[{time.strftime('%H:%M:%S')}] captured {result['packets']:,} packets ({result['bytes'] / 1e6:.1f} MB)", flush=True)
 
     report = {"settings": vars(a), "capture": {k: result[k] for k in ("packets", "seconds", "bytes")}, "planted_window_epoch": window}
-    needed = a.fm + a.ad + a.calibration + 2000
+    needed = a.train + a.calibration + 2000
     try:
         if result["packets"] < needed:
-            report["verdict"] = f"NOT ENOUGH PACKETS: {result['packets']:,} captured, {needed:,} needed with the reduced settings; Kitsune could not finish learning"
+            report["verdict"] = f"NOT ENOUGH PACKETS: {result['packets']:,} captured, {needed:,} needed with the reduced settings; the detector could not finish learning"
             print(report["verdict"], flush=True)
             a.keep = True
             print(f"the capture is kept so it can be extended or analysed later: {path}", flush=True)
         else:
             packets = list(iter_packets(path))
-            data = score_packets(iter(packets), a.fm, a.ad, progress_every=20000)
-            cutoff, first = calibrate_cutoff(data["scores"], a.fm, a.ad, a.calibration, a.fpr)
+            data = score_packets(iter(packets), a.train, progress_every=20000)
+            cutoff, first = calibrate_cutoff(data["scores"], a.train, a.calibration, a.fpr)
             res = analyse(packets, data["scores"], cutoff, first, window)
-            report["kitsune"] = {"cutoff": cutoff, "scoring_from_packet": first, **res}
-            print(f"Kitsune (reduced learning): cut-off {cutoff:.4f}; planted DNS query packets scored: {res['planted_query_packets_scored']}, "
+            report["packet_detector"] = {"cutoff": cutoff, "scoring_from_packet": first, **res}
+            print(f"Packet detector (reduced learning): cut-off {cutoff:.4f}; planted DNS query packets scored: {res['planted_query_packets_scored']}, "
                   f"flagged: {res['planted_flagged']} (recall {res['planted_recall']})", flush=True)
             print(f"   all other packets outside the burst: flagged {res['other_flagged_rate']:.4f} of {res['other_packets_scored']:,} (target {a.fpr})", flush=True)
             if res["flagged_rate_inside_window_not_planted"] is not None:
                 print(f"   other packets inside the burst window: flagged {res['flagged_rate_inside_window_not_planted']:.3f} of {res['packets_inside_window_not_planted']:,}", flush=True)
-            events, bad = parse_log(run_sensor_wsl(path))
-            report["maltrail"] = {"events": len(events), "unparsed": bad, "types": sorted({e["info"] for e in events})[:8]}
-            print(f"Maltrail sensor on the capture: {len(events)} events; types: {report['maltrail']['types']}", flush=True)
+            ev = rules_evidence(packets)
+            report["rules"] = {"evidence_items": len(ev), "signature_hits": sum(bool(e.detail.get("signature")) for e in ev),
+                               "reasons": sorted({e.reason[:80] for e in ev})[:8]}
+            print(f"rules layer on the capture: {len(ev)} evidence items", flush=True)
             report["verdict"] = ("measured on planted queries; reduced learning windows; one run" if res["planted_recall"] is not None else "no planted query packets were scored")
     finally:
         if not a.keep:
