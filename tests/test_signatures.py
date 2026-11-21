@@ -95,3 +95,31 @@ def test_blocklist_hit_is_a_signature(tmp_path):
     bl = Blocklists.from_files([f])
     ev = scan([pkt(1.0, dst="93.184.216.66"), pkt(2.0, dst="8.8.8.8", proto="udp", dport=53, qname="a.evil.example")], blocklists=bl)
     assert len(ev) == 2 and all(e.detail["signature"] for e in ev)
+
+
+def test_indicator_file_kinds_matching_and_suspicious_policy(tmp_path):
+    from layered_nids.signatures.trails import Trails
+    f = tmp_path / "t.csv"
+    f.write_text("# comment line\n"
+                 "198.18.5.5/,evilbot (malware),(static)\n"
+                 "198.18.6.6:8443,c2 panel (malicious),(static)\n"
+                 "bad.example,dropper (malware),(static)\n"
+                 "/payload/mirai.arm7,elf mirai (malware),(static)\n"
+                 "cdn.bad2.example/x/y.exe,dropper (malware),(static)\n"
+                 r"gen[0-9]{3}\.tk,generic (malware),(static)" "\n"
+                 "9.9.9.10,public resolver (suspicious),(static)\n")
+    tr = Trails.load(f)
+    assert len(tr) == 7 and "198.18.5.5" in tr.ips and "198.18.6.6:8443" in tr.ip_ports and "bad.example" in tr.domains and len(tr.regexes) == 1
+    ev = scan([pkt(1.0, dst="198.18.5.5"), pkt(2.0, dst="198.18.6.6", dport=8443),
+               pkt(3.0, dst="8.8.8.8", proto="udp", dport=53, qname="a.b.bad.example"),
+               pkt(4.0, dst="8.8.8.8", proto="udp", dport=53, qname="gen123.tk"),
+               pkt(5.0, req="GET x.example /payload/mirai.arm7?a=1"),
+               pkt(6.0, req="GET cdn.bad2.example /x/y.exe"),
+               pkt(7.0, dst="9.9.9.10")], trails=tr)
+    sig = {e.detail["trail"] for e in ev if e.detail["signature"]}
+    assert sig == {"198.18.5.5", "198.18.6.6:8443", "bad.example", "/payload/mirai.arm7", "cdn.bad2.example/x/y.exe", r"gen[0-9]{3}\.tk"}
+    weak = [e for e in ev if e.detail["trail"] == "9.9.9.10"]
+    assert len(weak) == 1 and weak[0].detail["signature"] is False and weak[0].score < 0.5
+    assert "evilbot" in [e for e in ev if e.detail["trail"] == "198.18.5.5"][0].reason          # description looked up from the file
+    assert not scan([pkt(1.0, dst="93.184.216.34", proto="udp", dport=53, qname="www.example.org")], trails=tr)     # ordinary traffic: nothing
+    assert not tr.match(pkt(1.0, dst="8.8.8.8", proto="udp", dport=53, qname="notbad.example"))                     # not a sub-domain

@@ -18,3 +18,13 @@ Code: `layered_nids/signatures/` (patterns, heuristics, scan). Tests: `tests/tes
 - Plain HTTP request lines only: no encrypted traffic, no request bodies, no headers. A hit means "looks like", not "succeeded".
 - Injected attacks are synthetic and were written by the same author as the rules; real attackers vary. Untested on real attack traffic.
 - No blocklist data is shipped; blocklists are supplied by the user.
+
+## Indicator matching (known-bad addresses, domains, URLs) - added 2026-11-21
+Code: `layered_nids/signatures/trails.py` (`Trails.load`, `scan(..., trails=...)`). The indicator data is NOT in this repository: it is a local file in `data/trails/` (git-ignored; community data that is free for defending your own systems and for research and education, not for redistribution or building into a service for others). With a 1.86-million-indicator file it loads in about 4 seconds.
+- Indicator kinds handled: address, address:port, domain (and every sub-domain), URL path, host+path, name patterns (36 regular expressions).
+- Policy: indicators described as "suspicious" (public resolvers, mass scanners) become weak evidence (score 0.3, not a signature hit); malware and malicious ones are signature hits (score 0.85). Without this policy the Mirai capture produced 238 "hits", all one public DNS server.
+- Side by side with the reference sensor on the SAME pcaps (sampled indicators of every kind turned into DNS lookups, connections and HTTP requests; 1,110 packets; counted as signature hits):
+  - domains: ours 98%, reference sensor 100%; address:port: ours 100%, sensor 100%; host+path: ours 100%, sensor 57%; URL paths: ours 98%, sensor 73%; plain addresses: ours 90%, sensor 14%.
+  - Ours misses only indicators described as "suspicious", which we report as weak evidence instead. The sensor reports far fewer plain addresses and URLs; I did not investigate why (it applies its own filtering rules), so "ours finds more" must not be read as "ours is better": a sensor that stays quiet on weak indicators can be the better choice.
+  - Normal traffic (the whole Mirai capture, 764,137 packets): ours 0 signature hits, sensor 0 indicator events.
+- Limits: the test traffic is synthetic and was built from the same indicator file the matcher uses; one capture of normal traffic; no whitelist of popular domains (the reference sensor has one); matching is on DNS names, addresses, and the HTTP request line only.

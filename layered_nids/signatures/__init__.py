@@ -19,7 +19,7 @@ __all__ = ["scan", "HeuristicConfig", "calibrate", "SIGNATURES", "match_request"
 SignatureConfig = HeuristicConfig
 
 
-def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None) -> list[Evidence]:
+def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None, trails=None) -> list[Evidence]:
     cfg = cfg or HeuristicConfig()
     packets = list(packets)
     out: list[Evidence] = []
@@ -36,6 +36,9 @@ def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None) -> list[E
             key = (h, w, "sig", name)
             e = hits.setdefault(key, {"n": 0, "score": sev, "first": p, "name": name})
             e["n"] += 1
+        if trails is not None:
+            for indicator, kind in trails.match(p):
+                hits.setdefault((h, w, "trail", indicator), {"n": 0, "score": 0.85, "first": p, "name": indicator, "tkind": kind})["n"] += 1
         if blocklists is not None:
             if p.qname:
                 f = blocklists.feeds_for_domain(p.qname)
@@ -46,12 +49,18 @@ def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None) -> list[E
                 f = blocklists.feeds_for_ip(other)
                 if f:
                     hits.setdefault((h, w, "ip", other), {"n": 0, "score": blocklists.confidence(len(f)), "first": p, "name": f"blocklisted address {other}", "feeds": sorted(f)})["n"] += 1
+    info = trails.describe({e["name"] for (_, _, kind, _), e in hits.items() if kind == "trail"}) if trails is not None and hits else {}
     for (h, w, kind, _), e in hits.items():
         p = e["first"]
         what = f"{e['name']}" + (f" (feeds: {', '.join(e['feeds'])})" if "feeds" in e else "")
+        if kind == "trail":
+            what = f"known-bad {e['tkind']} {e['name']}" + (f" ({info[e['name']]})" if info.get(e["name"]) else "")
         req = f" request '{p.httpreq[:160]}'" if kind == "sig" and p.httpreq else ""
-        out.append(Evidence("rules", h, ts(w), float(e["score"]), f"{h}: {what}{req}" + (f" ({e['n']} times)" if e["n"] > 1 else ""),
-                            {"signature": True, "trail": e["name"], "kind": kind, "count": e["n"], "src": p.src, "dst": p.dst,
+        score, is_sig = float(e["score"]), True
+        if kind == "trail" and (info.get(e["name"]) or "").rstrip().endswith("(suspicious)"):
+            score, is_sig = 0.3, False        # "suspicious" indicators include public DNS servers and mass scanners: weak evidence, not a signature hit
+        out.append(Evidence("rules", h, ts(w), score, f"{h}: {what}{req}" + (f" ({e['n']} times)" if e["n"] > 1 else ""),
+                            {"signature": is_sig, "trail": e["name"], "kind": kind, "count": e["n"], "src": p.src, "dst": p.dst,
                              **({"request": p.httpreq[:300]} if p.httpreq else {})}))
 
     # ---- behaviour heuristics (signature = False) -------------------------------------------------------------------------
