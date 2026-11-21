@@ -43,3 +43,6 @@ tools/dashboard/uploads/
 
 # dashboard local state (users, password file, uploads)
 local/
+
+# local-only comparison copy of a reference detector (never commit; restore with: cp -r reference/vendored/realtools layered_nids/realtools)
+layered_nids/realtools/
