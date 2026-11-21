@@ -1,68 +1,62 @@
-# Layered NIDS: final report (status 2026-11-20)
+# NIDS: final report (status 2026-11-21)
 
-Course: Advanced Machine Learning (MAI511-2), MSc AI/ML. Every number below was measured in this project unless marked "untested". Details and the exact commands are in the linked reports.
+Course: Advanced Machine Learning (MAI511-2), MSc AI/ML. Every number below was measured in this project unless marked "untested". Details and commands are in the linked reports.
 
 ## 1. What was built
-A network intrusion detection system that combines evidence from several detectors per host:
-- **Maltrail** (real sensor, MIT): blocklists and heuristics, run offline in WSL2 on pcap files. No ML.
-- **Kitsune** (real code, vendored, MIT): unsupervised ensemble of small autoencoders on per-packet statistics. A packet-by-packet wrapper was added; a parity test shows identical features and scores to the original.
-- **Our ML layers:** DGA domain classifier, supervised flow classifiers (UNSW-NB15 34 features, NetFlow 40 features), and a learned alert combiner.
-- **Fusion:** per-host evidence over time windows (binomial and beta-binomial p-values, noisy-OR with decay), with a per-layer policy (signature hits alert directly; Kitsune and heuristics accumulate).
-- **Inputs:** pcap files (replay), CSV flow files (`layered_nids/csvmode`), and a limited live capture (Npcap, admin-only, one UAC prompt per capture).
-- **Output:** Maltrail's own web dashboard on localhost (`tools/dashboard`), loaded with the real Maltrail events plus our alerts.
-
-Slips was studied (`reports/repo_evaluation.md`) but is not used: GPL, Linux/Docker only. No Slips code is in this project.
+A network intrusion detection system whose layers are all our own code:
+- **Packet anomaly detector** (`layered_nids/anomaly`): 120 damped-statistics features per packet, an ensemble of small autoencoders trained on normal traffic only, a threshold set by a target false-alarm rate on held-out normal packets, evidence per (host, time window) from binomial or beta-binomial counts. Streaming and batch scoring give the same scores; models are saved with a SHA-256 check. A first, simpler version (`layered_nids/packets`) is kept as a baseline.
+- **Signature and heuristic rules** (`layered_nids/signatures`): 10 web-attack patterns on HTTP request lines, user-supplied blocklists, and scan, flood, ARP, DNS-burst, random-DNS-name and beacon rules. No machine learning. A first rule set (`layered_nids/rules`) is kept as a baseline.
+- **DGA classifier**, **flow classifiers** (UNSW-NB15 and NetFlow) and the **CSV entry point** (`layered_nids/csvmode`).
+- **Fusion** (`layered_nids/fusion`, `layered_nids/pipeline`): per-host evidence accumulation (noisy-OR with decay), a per-layer alert policy, and a learned combiner for simulation studies.
+- **Dashboard** (`layered_nids/dashboard`): own stdlib server, localhost only, sign-in with a salted password hash and a session cookie, alerts and events tables, CSV upload.
 
 ## 2. Results
-### Real tools on the Mirai capture (764,137 packets, unlabelled)
-- Maltrail: 8 events, all heuristic "periodic beaconing" in minutes 2-8; none where Kitsune's scores change.
-- Kitsune: 0.7% of packets above the cut-off until about packet 121,700 (minute 74.4), then 88% flagged. Speed about 600-700 packets/s in pure Python.
-- Combined pipeline (alert threshold tuned on the first half of the assumed-normal stretch, checked on the second half): false alerts on the held-out half fall from 6 (about 1.2 per host-hour) at p = 0.99 to 0 at 1-1e-7 or stricter; alerts after the jump fall from 38 on 14 hosts to 10-11 on 2 hosts at the chosen threshold.
-- **Limit:** no labels. Recall and precision are NOT measured; "normal before the jump" is an assumption (swapping the halves gave 2 versus 4 alerting hosts).
+### Packet anomaly detector (`reports/anomaly/REPORT.md`)
+Injection benchmark on real normal traffic (the first 52 minutes of the Mirai capture, split in time order) with synthetic attacks; 3 model seeds x 3 injection seeds. This measures whether a behaviour is noticed, not accuracy on real attacks.
+- Horizontal scan: recall 1.00, episode found 100% (our first version 0.29 / 78%).
+- Port scan, SYN flood, UDP flood, bulk upload: recall about 1.00.
+- DNS burst: 0.86 (the first version 0.93): the rule layer covers this behaviour.
+- Low-and-slow beacon: not found at packet level (recall 0.04); the rule layer finds regular new connections.
+- False alarms on normal packets of uninvolved hosts: 1.88% +- 0.62 against a 1% target; the evidence layer, not the packet flag, keeps alerts per host-hour low.
+- Speed: about 10,600 packets/s for feature extraction.
+
+### Signature and heuristic rules (`reports/signatures/REPORT.md`)
+Seven injected behaviours found 3 of 3 times each (scan, port scan, SYN flood, UDP flood, DNS burst, web attacks, regular beacon connections); bulk upload not found (the packet model finds it). Plain HTTP request lines only; synthetic attacks written by the same author as the rules.
+
+### Combined pipeline on the Mirai capture (`reports/pipeline/mirai.json`, unlabelled, descriptive)
+The packet scores jump at minute 74.3. Alert threshold tuned on the first half of the stretch assumed normal and checked on the second half. Packet layer alone: 50 alerts on 7 hosts after the jump, none before. With the rules layer: 66 alerts, 7 of them before the jump (2 hosts, minutes 47.6 and 66.6): possible false alerts or real early activity, which cannot be told without labels. No recall or false-alarm rate is measured on this capture.
 
 ### DGA classifier (`reports/dga/REPORT.md`)
-Unseen-family evaluation, 5 folds, recall at 1% false alarms: n-gram 72.1% +- 8.4, character CNN 74.4% +- 10.5, average of both 74.8% +- 9.2 (AUC 0.961, Brier 0.076). The average beats n-gram in all 5 folds (about +2.7 points) but the CNN in only 3 of 5 (+0.4 points, inside the fold spread). The benign side is a top-sites list, so false alarms on real DNS are untested.
+Unseen-family evaluation, 5 folds, recall at 1% false alarms: n-gram 72.1% +- 8.4, character CNN 74.4% +- 10.5, average of both 74.8% +- 9.2 (AUC 0.961, Brier 0.076). The average beats the n-gram model in all 5 folds (about +2.7 points) but the CNN in only 3 of 5 (+0.4, inside the fold spread). The benign side is a top-sites list, so false alarms on real DNS are untested.
 
-### Flow classifier, UNSW-NB15 (`reports/flows/`)
-- The earlier project's ANN+forest blend reproduces its shipped numbers within 0.3 points (87.9% accuracy, 79.0% recall, 7.5% false alarms at the 3% policy).
-- Gradient boosting is better: 89.1% accuracy, 81.5% recall, about 7.1% false alarms (3 seeds). Leave-one-attack-out, 9 families, one seed: 73.9% detected versus 68.4%.
-- Negative results, reported as such: hyperparameter search (no gain, validation AUC about 0.982 for every setting), dropping shifted features (lower accuracy), reweighting to the test distribution (no gain), multi-class (no gain), derived NetFlow features (no gain).
-- Fuzzers and Reconnaissance stay weak (about 16% and 36% detected). The official test set is shifted from training (a classifier separates them with AUC 0.79), so about 7% false alarms at a 3% target is expected.
-
-### NetFlow flow classifier (`reports/flows/NETFLOW_REPORT.md`)
-All 40 features give AUC 1.0000 on unseen hosts: the dataset is easy, not the model strong. With only the 24 features a live packet-to-flow builder could compute: AUC 0.979, recall 64% at 3% false alarms, scanning 19%. No packet-to-flow builder was written.
+### Flow classifiers (`reports/flows/`, `reports/csv/dataset_tests.json`)
+- The earlier project's ANN + forest blend reproduces its shipped numbers within 0.3 points (87.9% accuracy, 79.0% recall, 7.5% false alarms at the 3% policy).
+- Gradient boosting: 89.1% accuracy, 81.5% recall, about 7.1% false alarms; leave-one-attack-out 73.9% against 68.4%.
+- The owner's earlier flow model, scored through CSV mode on the cleaned UNSW official test (46,830 flows), 3% policy: 89.2% accuracy, 77.5% recall, 4.8% false alarms. By the rule "equal-or-higher accuracy with fewer false alarms" it is the model used for UNSW CSV scoring. At the 1% policy: 86.3% accuracy, 60.8% recall, 0.6% false alarms.
+- Negative results, reported as such: hyperparameter search (no gain), dropping shifted features (lower accuracy), reweighting to the test distribution (no gain), multi-class (no gain), derived NetFlow features (no gain).
+- Fuzzers and Reconnaissance stay weak (about 16% and 36% detected). The official test is shifted from training (a classifier separates them with AUC 0.79).
+- NetFlow: all 40 features give AUC 1.0000 on unseen hosts (the dataset is easy, not the model strong); with only the 24 features a packet-to-flow builder could compute, AUC 0.979 and recall 64% at 3% false alarms. No packet-to-flow builder was written.
 
 ### Fusion (`reports/fusion/`) — simulation
-Built from real per-layer scores assuming independent layers, so an upper bound, not a network result. Budget: 0.5 false alerts per benign host-day; 20 test scenarios, mean +- std over scenarios.
-- **Unfair first run** (the evidence rule is told the nominal 3% false-alarm rate for flows, but the layer really gives 7.2-7.6%): cut-off and noisy-OR accumulation gave 9-27 false alerts per host-day and never met the budget; the learned combiner met it (98% of attackers detected at 0.23 false alerts per host-day with the improved flow model). This made the learned combiner look necessary.
-- **Fair baseline** (`*_told_fpr.json`: same scores and thresholds, but the rule is told each layer's locally measured false-alarm rate): noisy-OR accumulation also meets the budget. DGA + flows, stacked flow model: accumulation 100% detected at 0.08 false alerts/host-day (median 156 s to detect); learned combiner 100% at 0.30 (258 s); single cut-off 100% at 0.93 (over budget). Flows only: accumulation 64% at 0.08, learned combiner 64% at 0.21. The legacy flow model gives the same picture.
-- **Conclusion:** the learned combiner is NOT better than a correctly calibrated noisy-OR accumulator here. The earlier advantage came from the accumulator being mis-calibrated. What matters is telling each layer's evidence its real false-alarm rate (measured on local normal traffic). Accumulation reaches the grid edge (alert threshold 1 - 1e-10) in the two-layer case. Nested cross-validation not done.
+Built from real per-layer scores assuming independent layers: an upper bound, not a network result. Budget 0.5 false alerts per benign host-day; 20 test scenarios.
+- When the evidence rule is told a layer's nominal false-alarm rate but the layer really gives more (flows: 7.2-7.6% against 3%), accumulation gave 9-27 false alerts per host-day; the learned combiner met the budget.
+- When the rule is told each layer's locally measured false-alarm rate (fair baseline), accumulation also meets the budget: DGA + flows, 100% of attackers detected at 0.08 false alerts per host-day, against the learned combiner's 100% at 0.30. The learned combiner is therefore NOT better than a calibrated accumulator; what matters is calibration.
 
 ### CSV mode (`reports/csv/CSV_REPORT.md`)
-Reads UNSW, NetFlow and Argus files; tolerant of bad input (every row kept, bad cells reported). UNSW cleaned test through the tool (the owner's earlier flow model, chosen over our 34-feature model because at equal accuracy it gives fewer false alarms): 89.2% accuracy, 77.5% recall, 4.8% false alarms at the 3% policy; our 34-feature model gave 89.1% / 81.4% / 7.0% on the same rows. NetFlow: 200,000 rows in 8 s. Argus: scan rules only; found scans in 3 of 5 real sample files and nothing in the two whose malware traffic is not scanning (rules do not cover that).
-
-### Live path
-Self-test passed: a real 267-packet capture on this laptop's Wi-Fi, parsed completely, and the real Maltrail sensor flagged the planted harmless directory-traversal request. **Untested:** Kitsune on live traffic (needs about 55,000 packets to learn), long captures, true streaming, detection accuracy.
+Reads UNSW, NetFlow and Argus files; tolerant of bad input (every row kept, bad cells reported). NetFlow: 200,000 rows in 8 s. Argus files get scan rules only; on five real sample files scans were found in 3 and nothing in the two whose malware traffic is not scanning.
 
 ## 3. Engineering and safety choices
-- Smart App Control was not bypassed: the blocked Windows build was replaced by the Linux build in a hardened WSL2 (no Windows drives, no interop); Python 3.13 with established package versions avoids the reputation blocking.
-- Npcap runs in administrator-only mode; every capture needs a UAC approval, stays local, and is deleted afterwards.
-- The dashboard listens on 127.0.0.1 only, with its own random password stored as a PBKDF2 hash.
-- Model files are pickles with a SHA-256 check (detects accidental change, not a malicious author); the repository does not publish them.
-- 104 tests pass in the new package; the legacy backend has 54 passed, 1 skipped.
+- Dataset tests only; no live capture was run (owner decision).
+- The dashboard listens on 127.0.0.1 only, with a random password stored as a salted hash; uploads are size-capped, processed in a separate process and deleted after analysis.
+- Model files for the flow models are pickles with a SHA-256 check (detects accidental change, not a malicious author); the packet detector loads tensors only.
+- Windows Smart App Control was not bypassed: Python 3.13 with established package versions is used.
 
 ## 4. Limits (summary)
 - UNSW-NB15 is 2015 lab traffic; accuracy about 89%, never 90%.
-- No labelled packet data was used; the UCI Kitsune dataset could not be fetched (TLS check failed; not bypassed).
+- No labelled packet data was used; the benchmarks use injected synthetic attacks.
 - Fusion numbers are from a simulation.
 - Replay and CSV are not live detection.
 - The explanation module is our own Shapley estimator, not the `shap` package.
 
 ## 5. Related work and credits
-- Maltrail: M. Stampar, https://github.com/stamparm/maltrail (MIT; static trail data under separate terms).
-- Kitsune: Y. Mirsky, T. Doitshman, Y. Elovici, A. Shabtai, "Kitsune: An Ensemble of Autoencoders for Online Network Intrusion Detection", NDSS 2018; code https://github.com/ymirsky/Kitsune-py (MIT).
-- Slips: Stratosphere Laboratory, https://github.com/stratosphereips/StratosphereLinuxIPS (GPL-2.0; studied only).
-- UNSW-NB15: N. Moustafa, J. Slay, "UNSW-NB15: a comprehensive data set for network intrusion detection systems", MilCIS 2015.
-- NF-ToN-IoT and the NetFlow v2 feature set: University of Queensland NetFlow datasets (check the exact citation before submission).
-- DGA data: Mendeley "Legitimate domains and DGA categorized morphologically and by families" (CC BY 4.0).
-- Citations were written from memory of the sources and the repositories' own pages; verify titles, venues and years before submitting.
+Third-party credits, papers and licence texts are listed in `credits/CREDITS.md`, which is kept with the project and not published. Verify every citation there before submitting.

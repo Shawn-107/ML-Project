@@ -198,9 +198,9 @@ def test_scan_rules_find_scans_ignore_normal_flows_and_count_unreadable_rows(tmp
     assert out["is_attack"].sum() == 45 and len(out) == 52                    # 20 + 25 flows in findings, every row kept
 
 
-@pytest.mark.skipif(not (ROOT / "reference/StratosphereLinuxIPS/dataset/test11-portscan.binetflow").exists(), reason="Slips sample not present")
-def test_real_slips_portscan_sample_is_recognised_as_a_scan(tmp_path):
-    p = ROOT / "reference/StratosphereLinuxIPS/dataset/test11-portscan.binetflow"
+@pytest.mark.skipif(not (ROOT / "reference/reference IDS/dataset/test11-portscan.binetflow").exists(), reason="reference IDS sample not present")
+def test_real_reference_ids_portscan_sample_is_recognised_as_a_scan(tmp_path):
+    p = ROOT / "reference/reference IDS/dataset/test11-portscan.binetflow"
     s = process_csv(p, tmp_path / "ps.csv")
     f = pd.read_csv(s["findings_table"])
     assert s["schema"] == "argus" and s["findings"] >= 2

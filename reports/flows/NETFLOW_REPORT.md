@@ -20,7 +20,7 @@ Sample: 677,603 rows read; 309,834 after removing exact repeats; 81% attacks; 1,
 - Restricting the model to features that can be computed live costs a lot: recall at 3% false alarms falls from 96% to 64%, and scanning detection from 94% to 19%.
   The missing signal lives in features that depend on nProbe internals (application protocol, DNS fields, retransmission tracking, throughput definitions).
 - Therefore: a "live" flow classifier on exactly-reproducible features is much weaker than the full-feature one. The full-feature NetFlow model is CSV-only
-  (needs nProbe or a faithful reimplementation); live detection should rely on Kitsune and Maltrail.
+  (needs nProbe or a faithful reimplementation); live detection should rely on the packet detector and the rules layer.
 
 ## Limits
 - One dataset, one seed, one split. No cross-dataset test (no second NetFlow dataset with the same features on disk).

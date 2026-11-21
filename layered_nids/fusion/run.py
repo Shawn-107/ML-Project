@@ -1,4 +1,4 @@
-"""Fusion demo + ablation on the Kitsune Mirai capture (L1 rules + L3 packets).   python -m layered_nids.fusion.run
+"""Fusion demo + ablation on the Mirai capture (L1 rules + L3 packets).   python -m layered_nids.fusion.run
 
 Only packets from the held-out slice onward are fused (L3 was trained on the earlier packets, so its evidence there would
 be optimistic). Periods, in minutes of the capture, are DESCRIPTIVE, not labels:

@@ -1,6 +1,6 @@
 """Read packets from a capture file into small records (own parser; scapy is used only to read the file container).
 
-Supported: classic pcap (tested on the Kitsune example capture and on files written by our tests) with Ethernet link
+Supported: classic pcap (tested on the Mirai example capture and on files written by our tests) with Ethernet link
 type; IPv4, IPv6, ARP; TCP and UDP ports. pcapng goes through scapy's reader and has NOT been tested here.
 Anything else (other link types, truncated headers) yields a record with the fields it could read and zeros elsewhere,
 so packet numbering stays aligned with any label file.

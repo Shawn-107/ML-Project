@@ -1,7 +1,7 @@
-"""L3 experiment on the Kitsune Mirai capture.   python -m layered_nids.packets.run [--seeds 3] [--quick] [--labels FILE]
+"""L3 experiment on the Mirai capture.   python -m layered_nids.packets.run [--seeds 3] [--quick] [--labels FILE]
 
 Honest framing (also written into the report):
-  * Training data = the first 52.0 minutes, which the Kitsune paper (Table III) defines as the clean training phase.
+  * Training data = the first 52.0 minutes, which the published method (Table III) defines as the clean training phase.
     That period is cut in TIME ORDER into train / threshold / held-out normal; nothing is shuffled.
   * False-alarm rate is measured on the held-out normal slice (real measurement, assuming the paper's clean period).
   * Without a per-packet label file there is NO measured recall. The 'proxy' numbers use the traffic profile (minute >= 80
@@ -26,9 +26,9 @@ from layered_nids.packets.detector import PacketDetector
 from layered_nids.packets.extractor import FeatureExtractor
 from layered_nids.packets.pcap import iter_packets
 
-PCAP = DATA / "kitsune" / "mirai_example" / "mirai.pcap"
-CACHE = DATA / "kitsune" / "cache"
-TRAIN_MIN = 52.0          # Kitsune paper, Table III: Mirai train phase
+PCAP = DATA / "mirai" / "mirai_example" / "mirai.pcap"
+CACHE = DATA / "mirai" / "cache"
+TRAIN_MIN = 52.0          # published method, Table III: Mirai train phase
 ATTACK_PROXY_MIN = 80.0   # from the traffic profile, NOT from labels
 BIN_MIN = 8.0
 
@@ -118,7 +118,7 @@ def main(argv=None):
     ap.add_argument("--warmup-min", type=float, default=0.0,
                     help="minutes at the start used only to warm up the slow-decay statistics, not for training")
     ap.add_argument("--pcap", default=str(PCAP))
-    ap.add_argument("--labels", default=str(DATA / "kitsune" / "Mirai_labels.csv"))
+    ap.add_argument("--labels", default=str(DATA / "mirai" / "Mirai_labels.csv"))
     ap.add_argument("--quick", action="store_true", help="first 100k packets only, 1 seed, 3 epochs (smoke run)")
     ap.add_argument("--out", default=str(REPORTS / "packets" / "results.json"))
     a = ap.parse_args(argv)
@@ -180,7 +180,7 @@ def main(argv=None):
     report = {"data": {"packets": n, "warmup_min": a.warmup_min, "warmup_packets": w0, "train": a1 - w0,
                        "threshold": a2 - a1, "held_out_normal": n52 - a2,
                        "pcap": str(a.pcap), "target_fpr": a.fpr, "labels_used": labels is not None, "quick": a.quick,
-                       "clean_period": f"first {TRAIN_MIN} min (Kitsune paper, Table III), split in time order 60/20/20",
+                       "clean_period": f"first {TRAIN_MIN} min (published method, Table III), split in time order 60/20/20",
                        "proxy_definition": f"minute >= {ATTACK_PROXY_MIN:g} of the capture; chosen from the traffic profile "
                                            "(ARP share 4-7% -> 78-87%), NOT from ground-truth labels"},
               "summary": summary, "runs": results, "seconds": round(time.time() - t0, 1)}

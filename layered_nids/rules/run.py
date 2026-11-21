@@ -1,4 +1,4 @@
-"""L1 baseline on the Kitsune Mirai capture.   python -m layered_nids.rules.run [--fpr 0.01]
+"""L1 baseline on the Mirai capture.   python -m layered_nids.rules.run [--fpr 0.01]
 
 Same clean period and time split as L3: thresholds are calibrated on the first 80% of the paper's 52-minute clean
 period; the last 20% is held out to measure false alarms. Unit = (source host, 60 s window) that sent at least one packet.
@@ -17,7 +17,7 @@ from layered_nids.common.paths import DATA, REPORTS
 from layered_nids.packets.pcap import iter_packets
 from layered_nids.rules.engine import calibrate_rules, run_rules
 
-PCAP = DATA / "kitsune" / "mirai_example" / "mirai.pcap"
+PCAP = DATA / "mirai" / "mirai_example" / "mirai.pcap"
 TRAIN_MIN, PROXY_MIN = 52.0, 80.0
 
 

@@ -54,7 +54,7 @@ def stream(n_normal=5000, n_flood=600, seed=0):
 
 
 def test_score_calibrate_and_evidence_flag_the_flood_host_only():
-    data = score_packets(stream(), train_n=1800)
+    data = score_packets(stream(), train_n=1800, calib_n=1500)
     s = data["scores"]
     assert (s[:1800] == 0).all() and (s[1800:] > 0).all()
     cutoff, first = calibrate_cutoff(s, 1800, 1500, 0.01)

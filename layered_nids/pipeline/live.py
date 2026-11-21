@@ -1,6 +1,8 @@
 """Live capture adapter: record your OWN traffic for a limited time into a local pcap, then analyse it with the same code
-path as a replayed file ("capture, then analyse"; the Kitsune wrapper is packet-by-packet, so true streaming can be added
+path as a replayed file ("capture, then analyse"; the detector can also score one packet at a time, so true streaming can be added
 later without changing the layers).
+
+NOT USED in this project: the owner decided on 2026-11-21 that testing is done on datasets (pcap and CSV files), not on live captures.
 
   python -m layered_nids.pipeline.live --seconds 60 --max-packets 200000          # needs Npcap; Windows asks for approval (UAC)
 
@@ -11,8 +13,8 @@ Safety rules built in:
   - Npcap is installed admin-only: Windows shows an approval prompt; click Yes only for a capture you started.
 Do not capture on shared or public networks: other people's traffic is not yours to record.
 
-Limits: Kitsune needs tens of thousands of packets of clean traffic to learn before it can score (about 55,000 at its defaults),
-so a short capture shows the capture path working but cannot produce Kitsune alerts. Maltrail runs on the saved file in WSL2.
+Limits: the packet detector needs tens of thousands of packets of clean traffic to learn before it can score (about 70,000 at its defaults),
+so a short capture shows the capture path working but cannot produce packet alerts.
 """
 from __future__ import annotations
 
@@ -83,13 +85,13 @@ def main(argv=None):
     print(f"captured {info['packets']:,} packets in {info['seconds']} s ({info['bytes'] / 1e6:.2f} MB)", flush=True)
     print(f"the file stays on this PC: delete it when you are done: {info['path']}", flush=True)
     if a.analyse:
-        need = 5000 + 50000 + 15000
+        need = 55000 + 15000 + 2000
         if info["packets"] < need:
-            print(f"not enough packets to analyse with Kitsune's defaults: need about {need:,}, got {info['packets']:,}. "
+            print(f"not enough packets to analyse with the detector's defaults: need about {need:,}, got {info['packets']:,}. "
                   f"Capture longer, or analyse a replayed file instead.", flush=True)
         else:
             from layered_nids.pipeline.run import main as run_main
-            run_main(["--pcap", info["path"], "--maltrail", "--name", Path(out).stem])
+            run_main(["--pcap", info["path"], "--rules", "--name", Path(out).stem])
 
 
 if __name__ == "__main__":

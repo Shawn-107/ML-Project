@@ -2,7 +2,7 @@
 
    python -m layered_nids.signatures.benchmark
 
-Count thresholds are calibrated on the first 80% of the 52-minute clean period of the Kitsune Mirai capture (no attack data
+Count thresholds are calibrated on the first 80% of the 52-minute clean period of the Mirai capture (no attack data
 looked at); the last 20% is the hold stretch: false alerts are counted there without injections, then the attacks are merged in.
 An attack is detected when the rules emit evidence for the attacker host in a window that overlaps the episode.
 """

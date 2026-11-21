@@ -1,4 +1,4 @@
-"""Rule-based findings for flow files that carry a host and a time (Argus format, the one Slips reads). No machine learning:
+"""Rule-based findings for flow files that carry a host and a time (Argus format, the Argus flow format). No machine learning:
 there is no labelled Argus data here to train on, and a clear rule is better than an unmeasurable model.
 
   vertical_scan    one source touches at least `min_ports` different destination ports on ONE destination within `window_s` seconds

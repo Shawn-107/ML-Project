@@ -4,11 +4,11 @@
   "train": 51228,
   "threshold": 17076,
   "held_out_normal": 17076,
-  "pcap": "C:\\ML project 2\\data\\kitsune\\mirai_example\\mirai.pcap",
+  "pcap": "C:\\ML project 2\\data\\reference_detector\\mirai_example\\mirai.pcap",
   "target_fpr": 0.01,
   "labels_used": false,
   "quick": false,
-  "clean_period": "first 52.0 min (Kitsune paper, Table III), split in time order 60/20/20",
+  "clean_period": "first 52.0 min (published method, Table III), split in time order 60/20/20",
   "proxy_definition": "minute >= 80 of the capture; chosen from the traffic profile (ARP share 4-7% -> 78-87%), NOT from ground-truth labels"
  },
  "summary": {

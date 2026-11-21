@@ -1,5 +1,5 @@
 {
- "pcap": "data/kitsune/mirai.pcap",
+ "pcap": "data/mirai/mirai.pcap",
  "packets": 764137,
  "settings": {
   "name": null,

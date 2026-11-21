@@ -1,5 +1,5 @@
 {
-  "input": "c:\\ML project 2\\reference\\StratosphereLinuxIPS\\dataset\\test2-malicious.binetflow",
+  "input": "c:\\ML project 2\\reference\\reference IDS\\dataset\\test2-malicious.binetflow",
   "schema": "argus",
   "policy": null,
   "output": "c:\\ML project 2\\reports\\csv\\test2-malicious_scored.csv",

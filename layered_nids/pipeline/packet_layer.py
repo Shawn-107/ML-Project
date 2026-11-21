@@ -1,7 +1,6 @@
-"""Packet layer of the combined pipeline: our own packet anomaly detector -> per-host evidence.
+"""Packet layer of the combined pipeline: our own packet anomaly detector (layered_nids/anomaly) -> per-host evidence.
 
-Steps: (1) turn every packet into 100 damped-statistics features (packets/extractor.py) and train the autoencoder ensemble
-(packets/ensemble.py) on the first `train_n` packets, which must be clean traffic; (2) set the alert cut-off from a
+Steps: (1) train the detector on the first `train_n` packets, which must be clean traffic; (2) set the alert cut-off from a
 CALIBRATION window right after training, assumed normal; (3) turn flagged packets into per-(host, time window) evidence with
 the shared binomial rule in common/windows.py.
 
@@ -18,12 +17,13 @@ import numpy as np
 from layered_nids.common.hosts import pick_internal
 from layered_nids.common.metrics import threshold_at_fpr
 from layered_nids.common.windows import fit_overdispersion, window_counts, windowed_evidence
-from layered_nids.packets.ensemble import AutoencoderEnsemble
-from layered_nids.packets.extractor import FeatureExtractor
+from layered_nids.anomaly import PacketAnomalyDetector
+from layered_nids.anomaly.features import PacketFeatures
 from layered_nids.packets.pcap import iter_packets
 
 HOST_RULE = "v2"      # bump when internal_host changes: cached host columns are rebuilt, scores are not re-computed
 DEFAULT_TRAIN = 55_000
+DEFAULT_CALIB = 15_000
 
 
 def internal_host(p) -> str:
@@ -32,31 +32,30 @@ def internal_host(p) -> str:
     return pick_internal(p.src, p.dst)
 
 
-def score_packets(packets, train_n: int = DEFAULT_TRAIN, seed: int = 0, max_group: int = 10, epochs: int = 12,
+def score_packets(packets, train_n: int = DEFAULT_TRAIN, calib_n: int = DEFAULT_CALIB, seed: int = 0, fpr: float = 0.01,
                   progress_every: int = 0) -> dict:
-    """Features for every packet, ensemble trained on the first `train_n`, scores for the rest (0.0 for the learning part)."""
-    fx = FeatureExtractor()
-    rows, ts, hosts = [], [], []
-    t0 = time.time()
-    for i, p in enumerate(packets):
-        rows.append(fx.update(p))
-        ts.append(p.ts)
-        hosts.append(internal_host(p))
-        if progress_every and (i + 1) % progress_every == 0:
-            print(f"  features: {i + 1:,} packets, {(i + 1) / (time.time() - t0):.0f} packets/s", flush=True)
-    X = np.asarray(rows, dtype=np.float32).reshape(-1, fx.n_features)
-    scores = np.zeros(len(X), dtype=np.float64)
-    if len(X) > train_n:
-        ens = AutoencoderEnsemble(max_group=max_group, epochs=epochs, seed=seed).fit(X[:train_n])
-        scores[train_n:] = ens.score(X[train_n:])
-    return {"scores": scores, "ts": np.asarray(ts, dtype=np.float64), "hosts": np.asarray(hosts, dtype=str), "train_n": train_n}
+    """The detector is trained on the first `train_n` packets and calibrated on the next `calib_n`; scores are 0.0 for the
+    training part, the calibration window's own scores follow, then every later packet is scored in capture order."""
+    packets = list(packets)
+    ts = np.asarray([p.ts for p in packets], dtype=np.float64)
+    hosts = np.asarray([internal_host(p) for p in packets], dtype=str)
+    scores = np.zeros(len(packets), dtype=np.float64)
+    if len(packets) > train_n + calib_n:
+        t0 = time.time()
+        det = PacketAnomalyDetector(fpr=fpr, seed=seed).fit(packets[:train_n], packets[train_n:train_n + calib_n])
+        X = PacketFeatures().run(packets[:train_n + calib_n])                      # same features as inside fit(): their calibration scores
+        scores[train_n:train_n + calib_n] = det.ens.score(X[train_n:])
+        scores[train_n + calib_n:] = det.score_packets(packets[train_n + calib_n:])
+        if progress_every:
+            print(f"  detector: {len(packets):,} packets in {time.time() - t0:.0f} s", flush=True)
+    return {"scores": scores, "ts": ts, "hosts": hosts, "train_n": train_n}
 
 
-def score_pcap(pcap, cache=None, train_n: int = DEFAULT_TRAIN, limit: int | None = None, seed: int = 0,
+def score_pcap(pcap, cache=None, train_n: int = DEFAULT_TRAIN, limit: int | None = None, seed: int = 0, calib_n: int = DEFAULT_CALIB,
                progress_every: int = 100_000) -> dict:
     """Score a pcap, reusing `cache` (an .npz) only if it was made with the same settings and the same file size."""
     pcap = Path(pcap)
-    key = {"size": pcap.stat().st_size, "train_n": train_n, "limit": -1 if limit is None else limit, "seed": seed}
+    key = {"size": pcap.stat().st_size, "train_n": train_n, "calib_n": calib_n, "limit": -1 if limit is None else limit, "seed": seed, "detector": 2}
     if cache and Path(cache).exists():
         z = np.load(cache, allow_pickle=False)
         if all(k in z.files and int(z[k]) == v for k, v in key.items()):
@@ -65,39 +64,11 @@ def score_pcap(pcap, cache=None, train_n: int = DEFAULT_TRAIN, limit: int | None
                 hosts = np.asarray([internal_host(p) for p in iter_packets(pcap, limit)], dtype=str)
                 np.savez_compressed(cache, scores=z["scores"], ts=z["ts"], hosts=hosts, host_rule=HOST_RULE, **key)
             return {"scores": z["scores"], "ts": z["ts"], "hosts": hosts, "train_n": train_n, "cached": True}
-    data = score_packets(iter_packets(pcap, limit), train_n, seed, progress_every=progress_every)
+    data = score_packets(iter_packets(pcap, limit), train_n, calib_n, seed, progress_every=progress_every)
     if cache:
         Path(cache).parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(cache, scores=data["scores"], ts=data["ts"], hosts=data["hosts"], host_rule=HOST_RULE, **key)
     return data
-
-
-class StreamScorer:
-    """Packet-by-packet use for live capture: the first `train_n` packets are learned from (score 0.0), then each packet gets
-    its anomaly score as it arrives. Same detector as score_packets; features are updated one packet at a time."""
-
-    def __init__(self, train_n: int = DEFAULT_TRAIN, seed: int = 0, max_group: int = 10, epochs: int = 12):
-        self.train_n, self.seed, self.max_group, self.epochs = train_n, seed, max_group, epochs
-        self.fx = FeatureExtractor()
-        self._buf: list = []
-        self.ens: AutoencoderEnsemble | None = None
-        self.n = 0
-
-    @property
-    def ready(self) -> bool:
-        return self.ens is not None
-
-    def process(self, p) -> float:
-        x = self.fx.update(p)
-        self.n += 1
-        if self.ens is None:
-            self._buf.append(x)
-            if len(self._buf) >= self.train_n:
-                self.ens = AutoencoderEnsemble(max_group=self.max_group, epochs=self.epochs, seed=self.seed).fit(
-                    np.asarray(self._buf, dtype=np.float32))
-                self._buf = []
-            return 0.0
-        return float(self.ens.score(x.astype(np.float32)[None, :])[0])
 
 
 def calibrate_cutoff(scores, train_n: int, n_calibration: int, fpr: float) -> tuple[float, int]:

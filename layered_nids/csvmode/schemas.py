@@ -2,7 +2,7 @@
 
   unsw34      the UNSW-NB15 feature set the earlier project's model uses (34 columns)
   netflow_v2  NetFlow v2 features as in the NF-* datasets (40 feature columns, plus addresses and ports)
-  argus       Argus flow files (the format Slips reads): StartTime, SrcAddr, DstAddr, Dport, TotPkts, TotBytes, ...
+  argus       Argus flow files (the Argus flow format): StartTime, SrcAddr, DstAddr, Dport, TotPkts, TotBytes, ...
 
 Names are compared lower-case. Extra columns (labels, ids) are fine; missing required columns give a clear error naming the closest match.
 """

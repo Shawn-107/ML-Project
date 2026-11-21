@@ -1,16 +1,15 @@
-"""Injection benchmark: our detector against our first version and against the original Kitsune, on the same packets.
+"""Injection benchmark: our detector against our first version, on the same packets (an earlier run also compared a reference tool; its numbers are kept in benchmark_test.json).
 
    python -m layered_nids.anomaly.benchmark --stage validate     # choose between our own variants (validation injections)
    python -m layered_nids.anomaly.benchmark --stage test         # final numbers (different injections, 3 model seeds)
 
-Data: the first 52 minutes of the Kitsune Mirai capture (the paper's clean period), split in time order 60/20/20:
+Data: the first 52 minutes of the Mirai capture (the paper's clean period), split in time order 60/20/20:
 train / calibration (threshold, tail) / hold. Synthetic attacks (see inject.py) are merged into the HOLD part only.
 Every model is trained on the same clean train part, calibrated to the same 1% false-alarm rate on the same calibration part,
 and scored on the same attacked hold stream. Reported per attack kind (mean +- std over model seeds x injection seeds); false-alarm rate is also given for packets of hosts not involved in any attack (an attack changes the
 statistics of its own host and target, so their normal packets can look odd for a good reason):
   packet recall at the 1% policy, packet AUC (attack packets vs normal hold packets), and episode detection: does the attacker
   host get a 60 s window whose flagged-packet count has probability <= 1e-6 under the normal false-alarm rate.
-The original Kitsune is the vendored copy (comparison only; it is to be removed from the shipped code).
 """
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ from layered_nids.common.metrics import threshold_at_fpr
 from layered_nids.common.paths import DATA, REPORTS
 from layered_nids.packets.pcap import iter_packets
 
-PCAP = DATA / "kitsune" / "mirai.pcap"
+PCAP = DATA / "mirai" / "mirai.pcap"
 CLEAN_MIN = 52.0
 FPR = 0.01
 ALERT_P = 1e-6
@@ -87,28 +86,6 @@ class First:
     def score(self, stream):
         fx = copy.deepcopy(self.fx)
         return self.det.score(fx.run(stream))
-
-
-class Original:
-    """The original Kitsune (vendored copy), fed one packet at a time."""
-    name = "kitsune_original"
-
-    def __init__(self, seed):
-        self.seed = seed
-
-    def fit(self, train, calib):
-        from layered_nids.realtools.kitsune.stream import KitsuneStream
-        np.random.seed(self.seed)
-        fm = 5000
-        self.ks = KitsuneStream(fm_grace=fm, ad_grace=len(train) - fm)
-        for p in train:
-            self.ks.process(p)
-        cal = np.array([self.ks.process(p) for p in calib])
-        self.threshold = threshold_at_fpr(cal, FPR)
-
-    def score(self, stream):
-        ks = copy.deepcopy(self.ks)
-        return np.array([ks.process(p) for p in stream])
 
 
 # --------------------------------------------------------------------------------------------------------- metrics
@@ -188,7 +165,7 @@ def main(argv=None):
     print(f"packets: train {len(train):,} | calibration {len(calib):,} | hold {len(hold):,}", flush=True)
     inj = [100, 101] if a.stage == "validate" else [0, 1, 2]
     mseeds = range(a.model_seeds or (1 if a.stage == "validate" else 3))
-    names = a.models.split(",") if a.models else (list(VARIANTS) if a.stage == "validate" else ["nids_v1", "kitsune_original"])
+    names = a.models.split(",") if a.models else (list(VARIANTS) if a.stage == "validate" else ["nids_v1"])
     results = {}
     for name in names:
         rows, t0 = [], time.time()
@@ -197,8 +174,6 @@ def main(argv=None):
                 m = Own(name, ms, **VARIANTS[name])
             elif name == "nids_v1":
                 m = First(ms)
-            elif name == "kitsune_original":
-                m = Original(ms)
             else:
                 raise SystemExit(f"unknown model {name}")
             m.fit(train, calib)

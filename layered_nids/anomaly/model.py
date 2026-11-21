@@ -1,6 +1,6 @@
 """NIDS anomaly model: an ensemble of small autoencoders trained on normal traffic only.
 
-Idea (from the Kitsune paper, own implementation and own choices):
+Idea (from the published method, own implementation and own choices):
   1. Features that move together share a small autoencoder (correlation clustering, at most `max_group` features each).
      Small networks are cheap and one odd corner of the feature space is not averaged away by the other features.
   2. Each autoencoder learns to rebuild its group on NORMAL data; its reconstruction error (RMSE) says how unusual the group is.

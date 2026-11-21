@@ -1,4 +1,4 @@
-"""L5 evidence accumulation (the Slips idea, own code): per host, evidence from every layer adds up and fades.
+"""L5 evidence accumulation (own code): per host, evidence from every layer adds up and fades.
 
 Each Evidence has a score s in [0, 1]. It is turned into a weight  -log(1 - s)  (so s = 0.5 -> 0.69, s = 0.99 -> 4.6).
 Weights from independent pieces of evidence ADD, which is the same as combining them with noisy-OR:

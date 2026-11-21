@@ -1,6 +1,6 @@
 """Combined pipeline on a pcap: our packet detector + our rules -> per-host evidence -> fused alerts.
 
-  python -m layered_nids.pipeline.run --pcap data/kitsune/mirai.pcap --rules
+  python -m layered_nids.pipeline.run --pcap data/mirai/mirai.pcap --rules
 
 Packet scores are cached. Output: reports/pipeline/<name>.json and <name>.alerts.jsonl. The capture is UNLABELLED, so the report
 is DESCRIPTIVE: it shows what each layer and the fusion say and when, not detection rates.
@@ -144,7 +144,7 @@ def main(argv=None):
     cache = a.cache or str(REPORTS / "pipeline" / f"{name}_packet_scores.npz")
     out_path = Path(a.out or REPORTS / "pipeline" / f"{name}.json")
 
-    data = score_pcap(a.pcap, cache, a.train, a.limit)
+    data = score_pcap(a.pcap, cache, a.train, a.limit, calib_n=a.calibration)
     n = len(data["scores"])
     cutoff, first = calibrate_cutoff(data["scores"], a.train, a.calibration, a.fpr)
     t0 = float(data["ts"][0])
@@ -214,6 +214,12 @@ def main(argv=None):
             f.write(json.dumps({"host": al.host, "ts": al.ts, "probability": al.probability, "severity": al.severity,
                                 "layers": al.layers, "reasons": list(al.reasons), "setup": chosen_setup}, default=float) + "\n")
     report["alerts_file"] = str(alerts_path)
+    if ev_m:                                                           # the rules layer's evidence, for the dashboard's event table
+        events_path = out_path.with_suffix(".events.jsonl")
+        with events_path.open("w", encoding="utf-8") as f:
+            for e in sorted(ev_m, key=lambda e: e.ts):
+                f.write(json.dumps(e.to_dict(), default=float) + "\n")
+        report["events_file"] = str(events_path)
     for sname, alerts in setups.items():
         d = describe(alerts, t0, jump_ts)
         report["setups"][sname] = d

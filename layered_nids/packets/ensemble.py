@@ -1,4 +1,4 @@
-"""Ensemble of small autoencoders (the KitNET idea), own PyTorch code.
+"""Ensemble of small autoencoders (the published ensemble-of-autoencoders idea), own PyTorch code.
 
 1. Features are grouped by correlation (features that move together share an autoencoder), each group at most
    `max_group` wide. Small groups mean small networks: cheap, and an anomaly in one corner of the feature space is

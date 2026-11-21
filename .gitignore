@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/dga/*.csv
-data/kitsune/
+data/mirai/
 data/unsw/*.csv
 reference/
 legacy/original_artifacts/
@@ -33,7 +33,7 @@ tools/dashboard/logs/
 *.log
 *.err
 .claude/
-# third-party dataset copies and files derived from them (UNSW-NB15, Slips samples): get them from the sources in data/SOURCES.md
+# third-party dataset copies and files derived from them (UNSW-NB15 and other sample files): get them from the sources in data/SOURCES.md
 legacy/nids_backend/data/*.csv
 reports/csv/*.csv
 

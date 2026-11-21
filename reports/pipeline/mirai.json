@@ -1,41 +1,39 @@
 {
- "pcap": "data/kitsune/mirai.pcap",
+ "pcap": "data/mirai/mirai.pcap",
  "packets": 764137,
  "settings": {
   "name": null,
-  "maltrail": true,
-  "maltrail_log": null,
+  "rules": true,
   "cache": null,
   "limit": null,
-  "fm": 5000,
-  "ad": 50000,
+  "train": 55000,
   "calibration": 15000,
   "fpr": 0.01,
   "window": 60.0,
   "null": "burst",
   "alert_p": null,
   "budget": 0,
-  "out": null
+  "out": "reports/pipeline/mirai.json"
  },
- "alert_p_used": 0.999999999999,
+ "alert_p_used": 0.9999999,
  "tuning": {
   "assumption": "everything before the jump is normal (NOT a label)",
   "budget_alerts_on_tuning_half": 0,
   "segments": {
    "first_half": {
-    "minutes": 15.9,
+    "minutes": 15.8,
     "hosts_seen": 20,
-    "host_hours": 5.3
+    "host_hours": 5.28
    },
    "second_half": {
-    "minutes": 15.9,
-    "hosts_seen": 19,
-    "host_hours": 5.03
+    "minutes": 15.8,
+    "hosts_seen": 18,
+    "host_hours": 4.75
    },
    "after_jump": {
-    "minutes": 44.6,
+    "minutes": 44.7,
     "hosts_seen": 21,
-    "host_hours": 15.61
+    "host_hours": 15.65
    }
   },
   "runs": {
@@ -46,156 +44,156 @@
      "mu": 0.01,
      "rho": 0.0
     },
-    "chosen_alert_p": 0.999999999999,
+    "chosen_alert_p": 0.999999,
     "at_chosen": {
-     "alert_p": 0.999999999999,
+     "alert_p": 0.999999,
      "tuning_half": {
       "alerts": 0,
       "hosts": 0
      },
      "heldout_normal_half": {
-      "alerts": 0,
-      "hosts": 0
+      "alerts": 2,
+      "hosts": 2
      },
      "after_jump": {
-      "alerts": 11,
-      "hosts": 2
+      "alerts": 52,
+      "hosts": 8
      }
     },
     "curve": [
      {
       "alert_p": 0.99,
       "tuning_half": {
-       "alerts": 9,
-       "hosts": 5
+       "alerts": 11,
+       "hosts": 9
       },
       "heldout_normal_half": {
-       "alerts": 6,
-       "hosts": 5
+       "alerts": 9,
+       "hosts": 6
       },
       "after_jump": {
-       "alerts": 38,
-       "hosts": 14
+       "alerts": 69,
+       "hosts": 13
       }
      },
      {
       "alert_p": 0.999,
       "tuning_half": {
-       "alerts": 6,
-       "hosts": 4
+       "alerts": 8,
+       "hosts": 7
       },
       "heldout_normal_half": {
-       "alerts": 6,
-       "hosts": 5
+       "alerts": 7,
+       "hosts": 6
       },
       "after_jump": {
-       "alerts": 31,
+       "alerts": 62,
        "hosts": 11
       }
      },
      {
       "alert_p": 0.9999,
       "tuning_half": {
-       "alerts": 4,
+       "alerts": 3,
        "hosts": 3
       },
       "heldout_normal_half": {
-       "alerts": 3,
-       "hosts": 2
+       "alerts": 4,
+       "hosts": 3
       },
       "after_jump": {
-       "alerts": 20,
-       "hosts": 6
+       "alerts": 55,
+       "hosts": 9
       }
      },
      {
       "alert_p": 0.99999,
       "tuning_half": {
-       "alerts": 3,
-       "hosts": 2
+       "alerts": 1,
+       "hosts": 1
       },
       "heldout_normal_half": {
-       "alerts": 2,
-       "hosts": 2
+       "alerts": 3,
+       "hosts": 3
       },
       "after_jump": {
-       "alerts": 18,
-       "hosts": 5
+       "alerts": 52,
+       "hosts": 8
       }
      },
      {
       "alert_p": 0.999999,
       "tuning_half": {
-       "alerts": 2,
-       "hosts": 2
+       "alerts": 0,
+       "hosts": 0
       },
       "heldout_normal_half": {
        "alerts": 2,
        "hosts": 2
       },
       "after_jump": {
-       "alerts": 18,
-       "hosts": 5
+       "alerts": 52,
+       "hosts": 8
       }
      },
      {
       "alert_p": 0.9999999,
       "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "heldout_normal_half": {
        "alerts": 0,
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
       "alert_p": 0.99999999,
       "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "heldout_normal_half": {
        "alerts": 0,
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
       "alert_p": 0.999999999,
       "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "heldout_normal_half": {
        "alerts": 0,
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
       "alert_p": 0.9999999999,
       "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "heldout_normal_half": {
        "alerts": 0,
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 13,
-       "hosts": 3
+       "alerts": 48,
+       "hosts": 7
       }
      },
      {
@@ -209,8 +207,8 @@
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 11,
-       "hosts": 2
+       "alerts": 45,
+       "hosts": 6
       }
      }
     ]
@@ -230,73 +228,73 @@
       "hosts": 0
      },
      "heldout_normal_half": {
-      "alerts": 1,
-      "hosts": 1
+      "alerts": 0,
+      "hosts": 0
      },
      "after_jump": {
-      "alerts": 16,
-      "hosts": 4
+      "alerts": 50,
+      "hosts": 7
      }
     },
     "curve": [
      {
       "alert_p": 0.99,
       "tuning_half": {
-       "alerts": 6,
-       "hosts": 5
+       "alerts": 9,
+       "hosts": 6
       },
       "heldout_normal_half": {
-       "alerts": 9,
-       "hosts": 5
+       "alerts": 11,
+       "hosts": 9
       },
       "after_jump": {
-       "alerts": 38,
-       "hosts": 14
+       "alerts": 69,
+       "hosts": 13
       }
      },
      {
       "alert_p": 0.999,
       "tuning_half": {
-       "alerts": 6,
-       "hosts": 5
+       "alerts": 7,
+       "hosts": 6
       },
       "heldout_normal_half": {
-       "alerts": 6,
-       "hosts": 4
+       "alerts": 8,
+       "hosts": 7
       },
       "after_jump": {
-       "alerts": 31,
+       "alerts": 62,
        "hosts": 11
       }
      },
      {
       "alert_p": 0.9999,
       "tuning_half": {
-       "alerts": 3,
-       "hosts": 2
-      },
-      "heldout_normal_half": {
        "alerts": 4,
        "hosts": 3
       },
+      "heldout_normal_half": {
+       "alerts": 3,
+       "hosts": 3
+      },
       "after_jump": {
-       "alerts": 20,
-       "hosts": 6
+       "alerts": 55,
+       "hosts": 9
       }
      },
      {
       "alert_p": 0.99999,
       "tuning_half": {
-       "alerts": 2,
-       "hosts": 2
+       "alerts": 3,
+       "hosts": 3
       },
       "heldout_normal_half": {
-       "alerts": 3,
-       "hosts": 2
+       "alerts": 1,
+       "hosts": 1
       },
       "after_jump": {
-       "alerts": 18,
-       "hosts": 5
+       "alerts": 52,
+       "hosts": 8
       }
      },
      {
@@ -306,12 +304,12 @@
        "hosts": 2
       },
       "heldout_normal_half": {
-       "alerts": 2,
-       "hosts": 2
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 18,
-       "hosts": 5
+       "alerts": 52,
+       "hosts": 8
       }
      },
      {
@@ -321,12 +319,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -336,12 +334,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -351,12 +349,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -366,12 +364,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 13,
-       "hosts": 3
+       "alerts": 48,
+       "hosts": 7
       }
      },
      {
@@ -385,8 +383,8 @@
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 11,
-       "hosts": 2
+       "alerts": 45,
+       "hosts": 6
       }
      }
     ]
@@ -395,186 +393,9 @@
     "method": "burst",
     "swapped": false,
     "null": {
-     "mu": 0.00428,
-     "rho": 0.39,
+     "mu": 0.00477,
+     "rho": 0.1541,
      "windows_used": 232
-    },
-    "chosen_alert_p": 0.999999999999,
-    "at_chosen": {
-     "alert_p": 0.999999999999,
-     "tuning_half": {
-      "alerts": 0,
-      "hosts": 0
-     },
-     "heldout_normal_half": {
-      "alerts": 0,
-      "hosts": 0
-     },
-     "after_jump": {
-      "alerts": 10,
-      "hosts": 2
-     }
-    },
-    "curve": [
-     {
-      "alert_p": 0.99,
-      "tuning_half": {
-       "alerts": 13,
-       "hosts": 7
-      },
-      "heldout_normal_half": {
-       "alerts": 13,
-       "hosts": 8
-      },
-      "after_jump": {
-       "alerts": 49,
-       "hosts": 13
-      }
-     },
-     {
-      "alert_p": 0.999,
-      "tuning_half": {
-       "alerts": 7,
-       "hosts": 4
-      },
-      "heldout_normal_half": {
-       "alerts": 9,
-       "hosts": 6
-      },
-      "after_jump": {
-       "alerts": 34,
-       "hosts": 11
-      }
-     },
-     {
-      "alert_p": 0.9999,
-      "tuning_half": {
-       "alerts": 7,
-       "hosts": 4
-      },
-      "heldout_normal_half": {
-       "alerts": 8,
-       "hosts": 5
-      },
-      "after_jump": {
-       "alerts": 31,
-       "hosts": 8
-      }
-     },
-     {
-      "alert_p": 0.99999,
-      "tuning_half": {
-       "alerts": 5,
-       "hosts": 4
-      },
-      "heldout_normal_half": {
-       "alerts": 8,
-       "hosts": 4
-      },
-      "after_jump": {
-       "alerts": 28,
-       "hosts": 8
-      }
-     },
-     {
-      "alert_p": 0.999999,
-      "tuning_half": {
-       "alerts": 4,
-       "hosts": 4
-      },
-      "heldout_normal_half": {
-       "alerts": 4,
-       "hosts": 3
-      },
-      "after_jump": {
-       "alerts": 24,
-       "hosts": 8
-      }
-     },
-     {
-      "alert_p": 0.9999999,
-      "tuning_half": {
-       "alerts": 3,
-       "hosts": 3
-      },
-      "heldout_normal_half": {
-       "alerts": 2,
-       "hosts": 2
-      },
-      "after_jump": {
-       "alerts": 20,
-       "hosts": 6
-      }
-     },
-     {
-      "alert_p": 0.99999999,
-      "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
-      },
-      "heldout_normal_half": {
-       "alerts": 2,
-       "hosts": 2
-      },
-      "after_jump": {
-       "alerts": 19,
-       "hosts": 5
-      }
-     },
-     {
-      "alert_p": 0.999999999,
-      "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
-      },
-      "heldout_normal_half": {
-       "alerts": 0,
-       "hosts": 0
-      },
-      "after_jump": {
-       "alerts": 17,
-       "hosts": 4
-      }
-     },
-     {
-      "alert_p": 0.9999999999,
-      "tuning_half": {
-       "alerts": 1,
-       "hosts": 1
-      },
-      "heldout_normal_half": {
-       "alerts": 0,
-       "hosts": 0
-      },
-      "after_jump": {
-       "alerts": 15,
-       "hosts": 3
-      }
-     },
-     {
-      "alert_p": 0.999999999999,
-      "tuning_half": {
-       "alerts": 0,
-       "hosts": 0
-      },
-      "heldout_normal_half": {
-       "alerts": 0,
-       "hosts": 0
-      },
-      "after_jump": {
-       "alerts": 10,
-       "hosts": 2
-      }
-     }
-    ]
-   },
-   "burst_swapped": {
-    "method": "burst",
-    "swapped": true,
-    "null": {
-     "mu": 0.00624,
-     "rho": 0.2082,
-     "windows_used": 238
     },
     "chosen_alert_p": 0.9999999,
     "at_chosen": {
@@ -584,28 +405,28 @@
       "hosts": 0
      },
      "heldout_normal_half": {
-      "alerts": 1,
-      "hosts": 1
+      "alerts": 0,
+      "hosts": 0
      },
      "after_jump": {
-      "alerts": 17,
-      "hosts": 4
+      "alerts": 50,
+      "hosts": 7
      }
     },
     "curve": [
      {
       "alert_p": 0.99,
       "tuning_half": {
-       "alerts": 12,
-       "hosts": 8
+       "alerts": 16,
+       "hosts": 10
       },
       "heldout_normal_half": {
-       "alerts": 14,
-       "hosts": 7
+       "alerts": 10,
+       "hosts": 6
       },
       "after_jump": {
-       "alerts": 46,
-       "hosts": 14
+       "alerts": 73,
+       "hosts": 13
       }
      },
      {
@@ -615,57 +436,57 @@
        "hosts": 5
       },
       "heldout_normal_half": {
-       "alerts": 7,
-       "hosts": 4
+       "alerts": 8,
+       "hosts": 6
       },
       "after_jump": {
-       "alerts": 34,
-       "hosts": 11
+       "alerts": 64,
+       "hosts": 12
       }
      },
      {
       "alert_p": 0.9999,
       "tuning_half": {
-       "alerts": 6,
-       "hosts": 4
+       "alerts": 5,
+       "hosts": 3
       },
       "heldout_normal_half": {
-       "alerts": 6,
-       "hosts": 4
+       "alerts": 5,
+       "hosts": 3
       },
       "after_jump": {
-       "alerts": 30,
-       "hosts": 8
+       "alerts": 58,
+       "hosts": 9
       }
      },
      {
       "alert_p": 0.99999,
       "tuning_half": {
-       "alerts": 3,
+       "alerts": 5,
        "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 5,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 54,
+       "hosts": 9
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 1,
+       "hosts": 1
       },
       "heldout_normal_half": {
        "alerts": 4,
        "hosts": 3
       },
       "after_jump": {
-       "alerts": 22,
-       "hosts": 8
-      }
-     },
-     {
-      "alert_p": 0.999999,
-      "tuning_half": {
-       "alerts": 3,
-       "hosts": 3
-      },
-      "heldout_normal_half": {
-       "alerts": 2,
-       "hosts": 2
-      },
-      "after_jump": {
-       "alerts": 18,
-       "hosts": 5
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -675,12 +496,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 17,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -690,12 +511,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 16,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -705,12 +526,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 14,
-       "hosts": 4
+       "alerts": 50,
+       "hosts": 7
       }
      },
      {
@@ -720,12 +541,12 @@
        "hosts": 0
       },
       "heldout_normal_half": {
-       "alerts": 1,
-       "hosts": 1
+       "alerts": 0,
+       "hosts": 0
       },
       "after_jump": {
-       "alerts": 11,
-       "hosts": 3
+       "alerts": 48,
+       "hosts": 7
       }
      },
      {
@@ -739,54 +560,245 @@
        "hosts": 0
       },
       "after_jump": {
-       "alerts": 9,
+       "alerts": 45,
+       "hosts": 6
+      }
+     }
+    ]
+   },
+   "burst_swapped": {
+    "method": "burst",
+    "swapped": true,
+    "null": {
+     "mu": 0.01002,
+     "rho": 0.2787,
+     "windows_used": 237
+    },
+    "chosen_alert_p": 0.9999999,
+    "at_chosen": {
+     "alert_p": 0.9999999,
+     "tuning_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "heldout_normal_half": {
+      "alerts": 0,
+      "hosts": 0
+     },
+     "after_jump": {
+      "alerts": 50,
+      "hosts": 7
+     }
+    },
+    "curve": [
+     {
+      "alert_p": 0.99,
+      "tuning_half": {
+       "alerts": 10,
+       "hosts": 6
+      },
+      "heldout_normal_half": {
+       "alerts": 13,
+       "hosts": 7
+      },
+      "after_jump": {
+       "alerts": 72,
+       "hosts": 12
+      }
+     },
+     {
+      "alert_p": 0.999,
+      "tuning_half": {
+       "alerts": 6,
+       "hosts": 4
+      },
+      "heldout_normal_half": {
+       "alerts": 6,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 61,
+       "hosts": 11
+      }
+     },
+     {
+      "alert_p": 0.9999,
+      "tuning_half": {
+       "alerts": 5,
+       "hosts": 3
+      },
+      "heldout_normal_half": {
+       "alerts": 5,
+       "hosts": 3
+      },
+      "after_jump": {
+       "alerts": 58,
+       "hosts": 9
+      }
+     },
+     {
+      "alert_p": 0.99999,
+      "tuning_half": {
+       "alerts": 3,
        "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "after_jump": {
+       "alerts": 52,
+       "hosts": 8
+      }
+     },
+     {
+      "alert_p": 0.999999,
+      "tuning_half": {
+       "alerts": 2,
+       "hosts": 2
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 50,
+       "hosts": 7
+      }
+     },
+     {
+      "alert_p": 0.9999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 50,
+       "hosts": 7
+      }
+     },
+     {
+      "alert_p": 0.99999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 50,
+       "hosts": 7
+      }
+     },
+     {
+      "alert_p": 0.999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 50,
+       "hosts": 7
+      }
+     },
+     {
+      "alert_p": 0.9999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 48,
+       "hosts": 7
+      }
+     },
+     {
+      "alert_p": 0.999999999999,
+      "tuning_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "heldout_normal_half": {
+       "alerts": 0,
+       "hosts": 0
+      },
+      "after_jump": {
+       "alerts": 45,
+       "hosts": 6
       }
      }
     ]
    }
   }
  },
- "kitsune": {
-  "cutoff": 0.0805302553534259,
-  "scoring_from_packet": 70001,
-  "jump_packet": 121714,
-  "jump_minute": 74.4,
-  "evidence_windows": 225,
-  "cache_used": true
+ "packet_detector": {
+  "cutoff": 0.12983916699886322,
+  "scoring_from_packet": 70000,
+  "jump_packet": 121542,
+  "jump_minute": 74.3,
+  "evidence_windows": 388,
+  "cache_used": false
  },
- "maltrail": {
-  "events_for_internal_hosts": 8,
-  "unparsed_lines": 0,
+ "rules": {
+  "evidence_items": 327,
   "signature_hits": 0,
   "first_event_minutes": [
-   1.8,
+   -0.4,
+   0.6,
+   1.6,
+   2.6,
+   3.6,
+   4.6,
+   5.6,
+   6.6,
    7.6,
-   8.5
+   8.6
   ]
  },
  "setups": {
-  "kitsune_only": {
-   "alerts": 10,
-   "hosts_alerted": 2,
+  "packets_only": {
+   "alerts": 50,
+   "hosts_alerted": 7,
    "alerts_per_host_top5": {
+    "192.168.2.1": 8,
     "192.168.2.110": 8,
-    "192.168.2.115": 2
+    "192.168.2.107": 8,
+    "192.168.2.118": 8,
+    "192.168.2.103": 8
    },
    "first_alert_minute_per_host": {
-    "192.168.2.110": 79.6,
-    "192.168.2.115": 106.6
+    "192.168.2.1": 75.6,
+    "192.168.2.110": 75.6,
+    "192.168.2.107": 76.5,
+    "192.168.2.118": 77.6,
+    "192.168.2.103": 77.6,
+    "192.168.2.101": 77.6,
+    "192.168.2.196": 78.0
    },
    "severity": {
-    "critical": 10
+    "critical": 50
    },
    "layers_in_alerts": {
-    "packets": 10
+    "packets": 50
    },
    "alerts_before_jump": 0,
-   "alerts_after_jump": 10
+   "alerts_after_jump": 50
   },
-  "maltrail_signature_hits_direct": {
+  "rules_signature_hits_direct": {
    "alerts": 0,
    "hosts_alerted": 0,
    "alerts_per_host_top5": {},
@@ -796,48 +808,79 @@
    "alerts_before_jump": 0,
    "alerts_after_jump": 0
   },
-  "maltrail_heuristics_alone": {
-   "alerts": 0,
-   "hosts_alerted": 0,
-   "alerts_per_host_top5": {},
-   "first_alert_minute_per_host": {},
-   "severity": {},
-   "layers_in_alerts": {},
+  "rules_heuristics_alone": {
+   "alerts": 9,
+   "hosts_alerted": 1,
+   "alerts_per_host_top5": {
+    "192.168.2.110": 9
+   },
+   "first_alert_minute_per_host": {
+    "192.168.2.110": 76.6
+   },
+   "severity": {
+    "critical": 9
+   },
+   "layers_in_alerts": {
+    "rules": 9
+   },
    "alerts_before_jump": 0,
-   "alerts_after_jump": 0
+   "alerts_after_jump": 9
   },
   "policy_all_layers": {
-   "alerts": 10,
-   "hosts_alerted": 2,
+   "alerts": 66,
+   "hosts_alerted": 8,
    "alerts_per_host_top5": {
-    "192.168.2.110": 8,
-    "192.168.2.115": 2
+    "192.168.2.115": 12,
+    "192.168.2.1": 11,
+    "192.168.2.110": 9,
+    "192.168.2.107": 8,
+    "192.168.2.118": 8
    },
    "first_alert_minute_per_host": {
-    "192.168.2.110": 79.6,
-    "192.168.2.115": 106.6
+    "192.168.2.115": 47.6,
+    "192.168.2.1": 66.6,
+    "192.168.2.110": 74.6,
+    "192.168.2.107": 76.5,
+    "192.168.2.118": 77.6,
+    "192.168.2.103": 77.6,
+    "192.168.2.101": 77.6,
+    "192.168.2.196": 78.0
    },
    "severity": {
-    "critical": 10
+    "critical": 66
    },
    "layers_in_alerts": {
-    "rules": 8,
-    "packets": 10
+    "rules": 32,
+    "packets": 66
    },
-   "alerts_before_jump": 0,
-   "alerts_after_jump": 10
+   "alerts_before_jump": 7,
+   "alerts_after_jump": 59
   },
-  "need_kitsune_and_maltrail": {
-   "alerts": 0,
-   "hosts_alerted": 0,
-   "alerts_per_host_top5": {},
-   "first_alert_minute_per_host": {},
-   "severity": {},
-   "layers_in_alerts": {},
-   "alerts_before_jump": 0,
-   "alerts_after_jump": 0
+  "need_packets_and_rules": {
+   "alerts": 32,
+   "hosts_alerted": 3,
+   "alerts_per_host_top5": {
+    "192.168.2.115": 12,
+    "192.168.2.1": 11,
+    "192.168.2.110": 9
+   },
+   "first_alert_minute_per_host": {
+    "192.168.2.115": 47.6,
+    "192.168.2.1": 66.6,
+    "192.168.2.110": 74.6
+   },
+   "severity": {
+    "critical": 32
+   },
+   "layers_in_alerts": {
+    "rules": 32,
+    "packets": 32
+   },
+   "alerts_before_jump": 7,
+   "alerts_after_jump": 25
   }
  },
- "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where Kitsune's scores stay above its cut-off; it is not a labelled attack start. No recall or false-alarm rate is measured.",
- "alerts_file": "C:\\ML project 2\\reports\\pipeline\\mirai.alerts.jsonl"
+ "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where the packet detector's scores stay above its cut-off; it is not a labelled attack start. No recall or false-alarm rate is measured.",
+ "alerts_file": "reports\\pipeline\\mirai.alerts.jsonl",
+ "events_file": "reports\\pipeline\\mirai.events.jsonl"
 }

@@ -1,4 +1,4 @@
-"""Damped incremental statistics: the 'AfterImage' idea, written from the maths in the Kitsune paper (own code).
+"""Damped incremental statistics: the 'damped statistics' idea, written from the maths in the published method (own code).
 
 A stream summarises everything seen so far, but old packets count less and less. With decay rate lambda and a
 gap dt since the stream was last updated, every sum is first multiplied by gamma = 2 ** (-lambda * dt), then the new

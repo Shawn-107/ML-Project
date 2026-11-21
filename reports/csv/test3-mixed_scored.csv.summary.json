@@ -1,5 +1,5 @@
 {
-  "input": "c:\\ML project 2\\reference\\StratosphereLinuxIPS\\dataset\\test3-mixed.binetflow",
+  "input": "c:\\ML project 2\\reference\\reference IDS\\dataset\\test3-mixed.binetflow",
   "schema": "argus",
   "policy": null,
   "output": "c:\\ML project 2\\reports\\csv\\test3-mixed_scored.csv",

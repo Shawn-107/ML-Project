@@ -1,7 +1,7 @@
 """Blocklists supplied by the user (IPs and domains). No threat-intel data is bundled with this project.
 
 File format: one entry per line, '#' starts a comment. An entry is an IP address or a domain name. Each file is one
-named feed. Confidence follows the idea documented for Maltrail (more independent feeds -> more confidence), with our
+named feed. Confidence rises with the number of agreeing feeds (more independent feeds -> more confidence), with our
 own numbers: 0.4 for one feed, +0.15 for each extra feed, capped at 1.0. It measures agreement between feeds, not
 the chance of an attack.
 """

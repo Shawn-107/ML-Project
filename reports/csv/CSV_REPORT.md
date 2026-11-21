@@ -7,7 +7,7 @@ Models are trained with `python -m layered_nids.csvmode.models train` and saved 
 ## What it combines
 - The flow model of the owner's earlier project (`layered_nids/flowmodel`): gradient boosting on 11 UNSW-NB15 inputs, thresholds set on a validation split of whole K-Means clusters. It replaced our 34-feature gradient boosting after a head-to-head on the same rows (see below).
 - The NetFlow-v2 model (40 features, NF-ToN-IoT-v2, split by source host).
-- Host/time rules for Argus-format flow files, the format the Slips project reads (scan rules; no ML, since nothing labelled exists for it here).
+- Host/time rules for Argus-format flow files (scan rules; no ML, since nothing labelled exists for it here).
 
 ## Robustness (each point has a test)
 - Reads comma, tab, semicolon and pipe separated files; strips an invisible byte-order mark and padding spaces; skips malformed lines and COUNTS them.
@@ -29,7 +29,7 @@ Models are trained with `python -m layered_nids.csvmode.models train` and saved 
   - our model with the earlier project's cluster-grouped thresholds (3 seeds): AUC 0.954; 3% policy 89.1% / 79.0% / 5.7%; 1% policy 88.4% / 68.6% / 1.4%.
   - At the same false-alarm rate (thresholds chosen on the test itself, equal for both) ours ranks slightly better (AUC +0.003, interval 0.0025-0.0043 from row resampling, optimistic) but the earlier model's own thresholds are better calibrated (4.8% vs 7.0% false alarms at a 3% target). Rule used: equal accuracy, fewer false alarms wins, so the earlier model is used. Trade-off: about 4 points less recall at the 3% policy.
 - NetFlow file, first 200,000 rows: 8 seconds, 59 rows flagged with bad values, 0.03% of rows far outside the training range. Accuracy NOT measured on this slice (hosts overlap training).
-- The five real Slips sample files (Argus format): all processed with warnings, none crashed. Scan findings: port-scan file 1 vertical scan + 1 ICMP sweep; "mixed" file 1 horizontal scan; "malicious" file 4: 2 horizontal scans; tab-separated mixed file none; the 6,751-row "malicious" file none.
+- The five real sample files (Argus format): all processed with warnings, none crashed. Scan findings: port-scan file 1 vertical scan + 1 ICMP sweep; "mixed" file 1 horizontal scan; "malicious" file 4: 2 horizontal scans; tab-separated mixed file none; the 6,751-row "malicious" file none.
 
 ## Limits (read before relying on it)
 - The Argus rules only detect scanning. The two files with malware traffic that is not scanning produce NO findings; there is no ML for Argus format. Recall of the rules on those files is zero.
