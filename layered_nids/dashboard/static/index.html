@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NIDS</title><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<header>
+  <span class="brand">NIDS<small>layered network intrusion detection</small></span>
+  <nav><a href="/" class="on">Overview</a><a href="/app/">Flow analysis</a></nav>
+  <span class="spacer"></span>
+  <nav><button id="theme" title="light / dark">Theme</button><button id="out">Sign out</button></nav>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <div class="panel">
+    <div class="tabs">
+      <button data-t="alerts" class="on">Host alerts</button>
+      <button data-t="events">Rule events</button>
+      <button data-t="upload">Upload CSV</button>
+    </div>
+    <section id="t-alerts">
+      <div class="tools">
+        <input id="aq" placeholder="search host or reason">
+        <select id="asev"><option value="">any severity</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select>
+        <span class="note" id="acount"></span>
+      </div>
+      <div class="scroll"><table id="atab"></table></div>
+    </section>
+    <section id="t-events" hidden>
+      <div class="tools">
+        <input id="eq" placeholder="search host or reason">
+        <select id="ekind"><option value="">signatures and heuristics</option><option value="signature">signatures only</option><option value="heuristic">heuristics only</option></select>
+        <span class="note" id="ecount"></span>
+      </div>
+      <div class="scroll"><table id="etab"></table></div>
+    </section>
+    <section id="t-upload" hidden class="pad">
+      <div class="note" style="margin:0 0 10px">Analyse a flow file: UNSW-NB15 (34 columns), NetFlow v2 (40 columns) or Argus. The format is detected from the columns. Up to 100 MB. The file is deleted after analysis.</div>
+      <input type="file" id="file" accept=".csv,.tsv,.txt,.binetflow">
+      <select id="policy"><option value="fpr_3pct">3% false-alarm target</option><option value="fpr_1pct">1% false-alarm target (stricter)</option></select>
+      <button class="primary" id="go">Analyse</button>
+      <div id="result" style="margin-top:14px"></div>
+    </section>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

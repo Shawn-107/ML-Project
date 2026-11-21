@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NIDS - sign in</title><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<form class="login" id="f" autocomplete="on">
+  <h1>NIDS</h1>
+  <div class="note" style="margin-bottom:14px">Network intrusion detection. Sign in to continue.</div>
+  <label>User<input id="u" autocomplete="username" required></label>
+  <label>Password<input id="p" type="password" autocomplete="current-password" required></label>
+  <button class="primary" style="width:100%">Sign in</button>
+  <div class="err" id="e"></div>
+</form>
+<script src="/static/login.js"></script>
+</body>
+</html>

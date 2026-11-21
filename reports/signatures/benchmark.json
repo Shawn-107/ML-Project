@@ -1,0 +1,98 @@
+{
+ "calibrated": {
+  "window_s": 60.0,
+  "scan_min_targets": 41,
+  "flood_min_packets": 600,
+  "arp_min": 200,
+  "dns_min": 150,
+  "dns_random_min": 41,
+  "dns_random_entropy": 3.4,
+  "dns_random_min_len": 14,
+  "beacon_min_events": 8,
+  "beacon_cv": 0.1,
+  "beacon_min_gap_s": 5.0,
+  "beacon_max_gap_s": 900.0
+ },
+ "clean_hold_evidence": {
+  "scan": 2
+ },
+ "clean_hours": 0.17403978804747264,
+ "kinds": {
+  "hscan": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "scan": 3
+   }
+  },
+  "vscan": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "scan": 3,
+    "syn_flood": 3
+   }
+  },
+  "syn_flood": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "syn_flood": 3
+   }
+  },
+  "udp_flood": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "scan": 3,
+    "udp_flood": 3
+   }
+  },
+  "dns_burst": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "dns_burst": 3,
+    "dns_random": 3
+   }
+  },
+  "exfil": {
+   "detected": 0,
+   "of": 3,
+   "rules": {}
+  },
+  "beacon": {
+   "detected": 1,
+   "of": 3,
+   "rules": {
+    "scan": 1
+   }
+  },
+  "web_attack": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "command injection": 3,
+    "cross-site scripting": 3,
+    "directory traversal": 3,
+    "log4j lookup": 3,
+    "router/IoT exploit path": 3,
+    "sensitive file access": 3,
+    "sql injection": 3,
+    "web shell or admin probe": 3
+   }
+  },
+  "beacon_conn": {
+   "detected": 3,
+   "of": 3,
+   "rules": {
+    "beaconing": 3
+   }
+  }
+ },
+ "evidence_outside_episodes_per_injection_run": [
+  2,
+  0,
+  2
+ ]
+}

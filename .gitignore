@@ -40,3 +40,6 @@ reports/csv/*.csv
 # local only: credits and third-party licence texts (not published)
 credits/
 tools/dashboard/uploads/
+
+# dashboard local state (users, password file, uploads)
+local/

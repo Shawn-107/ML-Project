@@ -1,0 +1,109 @@
+proto,service,state,dbytes,smean,dload,ackdat,ct_src_dport_ltm,sbytes,dmean,spkts,label,attack_cat,source
+xyz-proto,-,INT,500.0,125.0,1000.0,0.0,1,500.0,125.0,4.0,,,synthetic: unknown protocol name (never seen in training)
+icmp,-,INT,0.0,84.0,0.0,0.0,18,84.0,0.0,1.0,,,synthetic: ICMP ping sweep
+tcp,-,FIN,268.0,53.0,2662.067627,0.092491,1,534.0,45.0,10.0,0,Normal,real flow from the official test file
+tcp,ftp,FIN,3742.0,56.0,34169.98438,0.000124,1,2934.0,69.0,52.0,0,Normal,real flow from the official test file
+tcp,http,FIN,268.0,130.0,7919.986816,0.046597,1,1302.0,45.0,10.0,1,Worms,real flow from the official test file
+tcp,-,FIN,268.0,52.0,2694.189697,0.127801,1,520.0,45.0,10.0,1,Shellcode,real flow from the official test file
+ttp,-,INT,0.0,100.0,0.0,0.0,4,200.0,0.0,2.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,646.0,61.0,8429.224609,0.066804,2,608.0,65.0,10.0,1,Exploits,real flow from the official test file
+tcp,-,FIN,728.0,57.0,4985.489746,0.031885,1,904.0,52.0,16.0,0,Normal,real flow from the official test file
+tcp,-,CON,86.0,169.0,1220.585327,0.077778,1,1012.0,43.0,6.0,0,Normal,real flow from the official test file
+tcp,http,FIN,1000000000000.0,1000000.0,1000000000000.0,5.0,60,1000000000000.0,1000000.0,1000000000.0,,,synthetic: extreme values (1e12 bytes)
+tcp,ftp-data,FIN,2002.0,53.0,71398.00781,0.000143,1,320.0,250.0,6.0,0,Normal,real flow from the official test file
+tcp,http,FIN,268.0,620.0,4590.493164,0.036935,1,8682.0,45.0,14.0,1,Worms,real flow from the official test file
+tcp,-,FIN,468.0,55.0,7565.724121,0.07043,1,548.0,47.0,10.0,1,Backdoor,real flow from the official test file
+tcp,-,RST,0.0,60.0,0.0,0.0,22,60.0,0.0,1.0,,,synthetic: port-scan probe 2: many ports in a short time
+vrrp,-,INT,0.0,100.0,0.0,0.0,3,200.0,0.0,2.0,1,Reconnaissance,real flow from the official test file
+cbt,-,INT,0.0,90.0,0.0,0.0,4,360.0,0.0,4.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,1918.0,90.0,94646.60156,0.00014,1,2158.0,96.0,24.0,0,Normal,real flow from the official test file
+tcp,http,FIN,268.0,325.0,10192.24219,0.010307,1,3900.0,45.0,12.0,1,DoS,real flow from the official test file
+tcp,-,FIN,24004.0,63.0,14600451.0,0.000133,1,2766.0,522.0,44.0,0,Normal,real flow from the official test file
+udp,dns,CON,130.0,35.0,210000.0,0.0,1,70.0,65.0,2.0,,,synthetic: ordinary DNS lookup
+tcp,-,FIN,840.0,808.0,7398.862305,0.055497,2,17778.0,84.0,22.0,1,Fuzzers,real flow from the official test file
+udp,-,INT,0.0,100.0,0.0,0.0,1,200.0,0.0,2.0,1,Shellcode,real flow from the official test file
+tcp,http,FIN,1430.0,84.0,8809.600586,0.069709,2,838.0,143.0,10.0,0,Normal,real flow from the official test file
+tcp,-,FIN,354.0,56.0,2015.886597,0.079322,1,564.0,44.0,10.0,1,Reconnaissance,real flow from the official test file
+arp,-,CON,138.0,28.0,14.456488,0.0,2,84.0,46.0,3.0,0,Normal,real flow from the official test file
+tcp,-,FIN,268.0,184.0,2840.467773,0.119934,1,1844.0,45.0,10.0,1,Fuzzers,real flow from the official test file
+tcp,smtp,FIN,3380.0,717.0,1084500.625,0.000148,1,37268.0,80.0,52.0,0,Normal,real flow from the official test file
+udp,-,INT,0.0,1000.0,0.0,0.0,20,3000000.0,0.0,3000.0,,,synthetic: UDP flood: huge one-way stream
+udp,-,CON,304.0,142.0,23270.05664,0.0,1,568.0,76.0,4.0,0,Normal,real flow from the official test file
+tcp,http,FIN,268.0,128.0,3289.515869,0.057886,1,1282.0,45.0,10.0,1,Worms,real flow from the official test file
+tcp,http,FIN,268.0,102.0,6981.537109,0.025635,1,1022.0,45.0,10.0,1,Worms,real flow from the official test file
+tcp,smtp,FIN,1992.0,874.0,13850.82324,0.048451,1,50681.0,77.0,58.0,1,DoS,real flow from the official test file
+tcp,http,FIN,308476.0,50.0,615299.375,0.11652,1,2416.0,1307.0,48.0,1,Worms,real flow from the official test file
+tcp,http,FIN,268.0,620.0,3660.071045,0.028049,1,8682.0,45.0,14.0,1,Worms,real flow from the official test file
+udp,-,INT,0.0,250.0,0.0,0.0,1,500.0,0.0,2.0,1,Shellcode,real flow from the official test file
+tcp,-,FIN,1816.0,1282.0,6950.144043,0.054093,1,330718.0,43.0,258.0,1,DoS,real flow from the official test file
+tcp,-,FIN,1644.0,96.0,885278.625,0.000153,6,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+tcp,http,FIN,1320.0,85.0,6971.564941,0.081076,1,852.0,132.0,10.0,1,Exploits,real flow from the official test file
+tcp,-,FIN,1644.0,96.0,658923.375,0.000127,6,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+tcp,-,CON,86.0,166.0,1732.884033,0.072573,5,998.0,43.0,6.0,0,Normal,real flow from the official test file
+rsvp,-,INT,0.0,100.0,0.0,0.0,1,200.0,0.0,2.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,354.0,53.0,1190.649414,0.107914,1,534.0,44.0,10.0,0,Normal,real flow from the official test file
+tcp,ftp,FIN,682.0,57.0,5056.425293,0.074188,1,798.0,57.0,14.0,1,Fuzzers,real flow from the official test file
+tcp,ftp-data,FIN,990.0,45.0,2570.475098,0.078315,1,450.0,124.0,10.0,1,Exploits,real flow from the official test file
+udp,dns,CON,178.0,73.0,687258.6875,0.0,3,146.0,89.0,2.0,0,Normal,real flow from the official test file
+tcp,-,FIN,564.0,47.0,3951.150391,0.066476,1,558.0,71.0,12.0,1,Backdoor,real flow from the official test file
+tcp,-,FIN,268.0,53.0,2133.673828,0.043926,1,534.0,45.0,10.0,0,Normal,real flow from the official test file
+tcp,-,FIN,20718.0,64.0,10101763.0,0.000158,1,2542.0,518.0,40.0,0,Normal,real flow from the official test file
+tcp,-,FIN,15182.0,64.0,3575867.0,0.000123,1,7808.0,120.0,122.0,0,Normal,real flow from the official test file
+tcp,-,FIN,32368.0,62.0,3380508.5,0.000132,1,2958.0,647.0,48.0,0,Normal,real flow from the official test file
+tcp,-,FIN,354.0,56.0,1616.805298,0.053435,1,564.0,44.0,10.0,1,Reconnaissance,real flow from the official test file
+tcp,-,INT,0.0,60.0,0.0,0.0,14,60.0,0.0,1.0,,,"synthetic: port-scan probe: tiny packet, no reply"
+tcp,-,FIN,354.0,619.0,2622.368408,0.062856,1,9904.0,44.0,16.0,1,DoS,real flow from the official test file
+tcp,-,FIN,610033.0,53.0,1583688.125,0.047564,1,4326.0,1350.0,82.0,1,Generic,real flow from the official test file
+tcp,-,FIN,268.0,63.0,9631.508789,0.047277,1,634.0,45.0,10.0,1,Shellcode,real flow from the official test file
+tcp,http,FIN,115574.0,80.0,1855879.5,0.007717,1,1770.0,1256.0,22.0,1,Generic,real flow from the official test file
+tcp,-,FIN,268.0,206.0,2824.992188,0.102257,1,2060.0,45.0,10.0,1,Generic,real flow from the official test file
+tcp,-,FIN,268.0,85.0,2602.525391,0.128077,1,846.0,45.0,10.0,1,Backdoor,real flow from the official test file
+tcp,-,FIN,354.0,113.0,5776.348145,0.049576,1,1132.0,44.0,10.0,1,Shellcode,real flow from the official test file
+tcp,-,FIN,354.0,56.0,2403.261475,0.076553,1,564.0,44.0,10.0,1,Reconnaissance,real flow from the official test file
+tcp,-,FIN,354.0,56.0,1420.794678,0.041302,1,564.0,44.0,10.0,1,Reconnaissance,real flow from the official test file
+tcp,-,INT,0.0,0.0,0.0,0.0,0,0.0,0.0,0.0,,,synthetic: all zeros
+tcp,-,FIN,268.0,635.0,2892.020508,0.038899,1,8896.0,45.0,14.0,1,Generic,real flow from the official test file
+tcp,-,FIN,354.0,52.0,1857.078369,0.06404,1,518.0,44.0,10.0,1,Shellcode,real flow from the official test file
+tcp,-,FIN,3080.0,153.0,15228.76465,0.000161,1,4272.0,103.0,28.0,0,Normal,real flow from the official test file
+tcp,-,FIN,822.0,92.0,3955.54541,0.161329,1,1106.0,82.0,12.0,1,Fuzzers,real flow from the official test file
+tcp,smtp,FIN,1900.0,966.0,2400.0,0.03,1,58000.0,95.0,60.0,,,synthetic: SMTP mail upload
+tcp,smtp,FIN,1882.0,876.0,15810.37988,0.045989,1,45569.0,78.0,52.0,1,DoS,real flow from the official test file
+tcp,-,FIN,1644.0,96.0,670806.125,0.000123,5,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+tcp,ssh,FIN,1200.0,1200.0,4000.0,0.03,1,48000000.0,60.0,40000.0,,,synthetic: one-way bulk upload (looks like data exfiltration)
+tcp,-,FIN,268.0,63.0,8835.943359,0.05277,1,626.0,45.0,10.0,1,Backdoor,real flow from the official test file
+tcp,http,FIN,12400.0,80.0,160000.0,0.02,1,720.0,1240.0,9.0,,,synthetic: ordinary web page load
+tcp,-,FIN,46036.0,60.0,16436925.0,0.000144,1,3598.0,743.0,60.0,0,Normal,real flow from the official test file
+tcp,http,FIN,1114.0,98.0,23813.19922,0.047039,1,1176.0,111.0,12.0,1,Backdoor,real flow from the official test file
+tcp,http,FIN,1278.0,81.0,16777.33398,0.06695,1,810.0,160.0,10.0,0,Normal,real flow from the official test file
+vines,-,INT,0.0,100.0,0.0,0.0,4,200.0,0.0,2.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,536.0,53.0,123.171257,0.028663,2,1068.0,45.0,20.0,0,Normal,real flow from the official test file
+tcp,pop3,FIN,82360.0,46.0,624887.6875,0.045778,1,1292.0,1056.0,28.0,1,Exploits,real flow from the official test file
+tcp,http,FIN,600.0,66.0,300.0,0.9,1,400.0,100.0,6.0,,,"synthetic: slow handshake, small transfer"
+tcp,-,FIN,678.0,377.0,6352.27002,0.050894,1,6034.0,57.0,16.0,0,Normal,real flow from the official test file
+tcp,-,FIN,594.0,57.0,4441.962891,0.0,1,678.0,54.0,12.0,1,Fuzzers,real flow from the official test file
+tcp,-,FIN,410.0,45.0,11527.93262,0.045567,1,454.0,51.0,10.0,1,Backdoor,real flow from the official test file
+tcp,-,FIN,354.0,151.0,1148.449707,0.070067,1,1506.0,44.0,10.0,0,Normal,real flow from the official test file
+tcp,ftp-data,FIN,546.0,46.0,2323.795166,0.107469,1,364.0,68.0,8.0,1,Exploits,real flow from the official test file
+tcp,http,FIN,268.0,140.0,10850.87305,0.012354,3,1398.0,45.0,10.0,1,Exploits,real flow from the official test file
+tcp,-,FIN,268.0,252.0,2707.140869,0.084818,1,2516.0,45.0,10.0,0,Normal,real flow from the official test file
+udp,-,INT,0.0,1065.0,0.0,0.0,1,2130.0,0.0,2.0,1,Fuzzers,real flow from the official test file
+tcp,-,FIN,13288.0,66.0,5869938.0,0.000156,1,2230.0,369.0,34.0,0,Normal,real flow from the official test file
+tcp,-,FIN,354.0,65.0,3833.57373,0.046693,1,392.0,44.0,6.0,1,Reconnaissance,real flow from the official test file
+tcp,-,FIN,1644.0,96.0,671749.0625,0.000122,1,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+tcp,ftp-data,FIN,424.0,638.0,49787.79688,0.000134,1,8928.0,53.0,14.0,0,Normal,real flow from the official test file
+tcp,-,FIN,1644.0,96.0,355733.7188,0.000125,9,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+ddp,-,INT,0.0,100.0,0.0,0.0,6,200.0,0.0,2.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,556.0,54.0,3065.398926,0.104637,1,860.0,56.0,16.0,0,Normal,real flow from the official test file
+tcp,-,FIN,268.0,53.0,3330.112305,0.062874,2,534.0,45.0,10.0,0,Normal,real flow from the official test file
+tcp,ftp,FIN,2500000.0,64.0,900000.0,0.04,2,900.0,1400.0,14.0,,,synthetic: FTP session with a large transfer
+tcp,-,FIN,1644.0,96.0,41032.68359,0.000209,5,1540.0,91.0,16.0,0,Normal,real flow from the official test file
+mfe-nsp,-,INT,0.0,100.0,0.0,0.0,4,200.0,0.0,2.0,1,Analysis,real flow from the official test file
+tcp,-,FIN,354.0,212.0,5486.677246,0.051528,1,2120.0,44.0,10.0,1,Generic,real flow from the official test file
+udp,dns,CON,164.0,66.0,645669.25,0.0,2,132.0,82.0,2.0,0,Normal,real flow from the official test file
+tcp,-,FIN,354.0,83.0,1936.072144,0.094164,1,826.0,44.0,10.0,0,Normal,real flow from the official test file
+tcp,-,FIN,268.0,53.0,3068.540527,0.068655,3,534.0,45.0,10.0,0,Normal,real flow from the official test file
+tcp,http,FIN,268.0,59.0,3059.200195,0.020378,1,590.0,45.0,10.0,1,Generic,real flow from the official test file
+tcp,-,FIN,1110.0,80.0,5258.060547,0.053181,1,802.0,111.0,10.0,1,DoS,real flow from the official test file
+tcp,-,FIN,63878.0,59.0,16699904.0,0.000139,1,4238.0,863.0,72.0,0,Normal,real flow from the official test file
+tcp,-,FIN,642.0,61.0,4142.217285,0.050911,2,978.0,54.0,16.0,0,Normal,real flow from the official test file
+tcp,http,FIN,3000.0,80.0,50000.0,0.02,1,-500.0,500.0,6.0,,,synthetic: negative counter (the service clips it to 0)
