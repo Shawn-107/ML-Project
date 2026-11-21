@@ -6,7 +6,10 @@ Evidence.detail["signature"] is True for a pattern or blocklist hit and False fo
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from layered_nids.common.hosts import pick_internal
+from layered_nids.common.paths import DATA
 from layered_nids.common.schema import Evidence
 
 try:                                                     # the newer rules package, when present
@@ -19,10 +22,33 @@ def is_signature(e: Evidence) -> bool:
     return e.layer == "rules" and bool(e.detail.get("signature"))
 
 
-def rules_evidence(packets, blocklists=None) -> list[Evidence]:
+TRAILS_FILE = DATA / "trails" / "trails.csv"                 # local indicator data (never committed); optional popular-domain list next to it
+WHITELIST_FILE = DATA / "trails" / "whitelist.txt"
+
+
+def load_default_trails():
+    """The local indicator file, if the user put one in data/trails/ (with an optional whitelist.txt); otherwise None."""
+    if not TRAILS_FILE.exists():
+        return None
+    from layered_nids.signatures.trails import Trails
+    t = Trails.load(TRAILS_FILE)
+    if WHITELIST_FILE.exists():
+        t.load_whitelist(WHITELIST_FILE)
+    return t
+
+
+def rules_evidence(packets, blocklists=None, trails="auto", external_pcap=None) -> list[Evidence]:
+    """Rule evidence for the packets. `trails`: "auto" loads data/trails/trails.csv when it exists, None skips indicator matching, or pass a Trails object.
+    `external_pcap`: path of the same capture; when given and an external sensor is configured (see signatures/external.py), its events are added."""
     packets = list(packets)
     if _scan is not None:
-        return list(_scan(packets, blocklists=blocklists))
+        tr = load_default_trails() if isinstance(trails, str) and trails == "auto" else trails
+        ev = list(_scan(packets, blocklists=blocklists, trails=tr))
+        if external_pcap is not None:
+            from layered_nids.signatures import external
+            if external.configured():
+                ev += external.run_external_sensor(external_pcap)
+        return ev
     from layered_nids.rules.engine import RuleConfig, calibrate_rules, run_rules
     cfg = calibrate_rules(packets[: max(len(packets) // 4, 1000)])           # thresholds from the first quarter (assumed clean)
     out = []

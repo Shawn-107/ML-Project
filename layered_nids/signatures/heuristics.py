@@ -7,7 +7,8 @@ the transparent baseline the ML layers are compared with.
   arp_flood     one host sends very many ARP packets
   icmp_sweep    one host sends ICMP packets to many different destinations (ping sweep)
   dns_burst     one host sends very many DNS queries
-  dns_random    one host asks for many long, random-looking names (high character entropy): DGA malware or DNS tunnelling
+  dns_random    one host asks for many long, random-looking names (DNS lookups or TLS server names, high character entropy): DGA malware
+  dns_tunnel    one host sends many very long DNS names (data smuggled inside lookups)
   beaconing     a host contacts the same external (destination, port) at very regular intervals
 
 A rule never raises an alert by itself: it returns Evidence (see common/schema.py). Count rules score 0.5 at the threshold and
@@ -38,6 +39,8 @@ class HeuristicConfig:
     dns_random_min: int = 25            # random-looking names per host-window
     dns_random_entropy: float = 3.4     # bits per character of the name without dots (random 12-letter labels give about 3.3-3.6)
     dns_random_min_len: int = 14
+    dns_tunnel_min: int = 10            # DNS names of at least `dns_tunnel_len` characters per host-window
+    dns_tunnel_len: int = 60
     beacon_min_events: int = 8
     beacon_cv: float = 0.10             # std/mean of the gaps between contacts
     beacon_min_gap_s: float = 5.0
@@ -58,6 +61,7 @@ class _Window:
     icmp_dsts: set = field(default_factory=set)
     dns: int = 0
     random_names: int = 0
+    long_names: int = 0
     random_examples: list = field(default_factory=list)
 
 
@@ -81,11 +85,13 @@ def window_features(packets, window_s: float) -> dict:
                 w.per_dst_udp[p.dst] += 1
         if p.qname:
             w.dns += 1
-            name = p.qname.replace(".", "")
-            if len(name) >= 14 and entropy(p.qname) >= 3.4:
+            if len(p.qname) >= 60:
+                w.long_names += 1
+        for nm in (p.qname, p.sni):                                   # names the host looked up or connected to (DNS and TLS server name)
+            if nm and len(nm.replace(".", "")) >= 14 and entropy(nm) >= 3.4:
                 w.random_names += 1
                 if len(w.random_examples) < 3:
-                    w.random_examples.append(p.qname)
+                    w.random_examples.append(nm)
     return out
 
 
@@ -105,6 +111,7 @@ def calibrate(clean_packets, fpr: float = 0.01, window_s: float = 60.0) -> Heuri
     cfg.icmp_sweep_min = q((len(w.icmp_dsts) for w in ws.values()), cfg.icmp_sweep_min)
     cfg.dns_min = q((w.dns for w in ws.values()), cfg.dns_min)
     cfg.dns_random_min = q((w.random_names for w in ws.values()), cfg.dns_random_min)
+    cfg.dns_tunnel_min = q((w.long_names for w in ws.values()), cfg.dns_tunnel_min)
     return cfg
 
 

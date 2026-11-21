@@ -28,6 +28,34 @@ class Packet(NamedTuple):
     qname: str = ""    # DNS query name for UDP queries to port 53 (lower-case, no trailing dot), else ""
     flags: int = 0     # TCP flag byte (SYN = 0x02, ACK = 0x10, ...), 0 for other protocols
     httpreq: str = ""  # "METHOD host path" for the first line of a plain HTTP request (at most 300 characters), else ""
+    sni: str = ""      # server name (lower-case) of a TLS ClientHello, so encrypted web traffic still shows WHERE it goes, else ""
+
+
+def tls_sni(payload: bytes) -> str:
+    """Server name from a TLS ClientHello that starts this TCP payload, or ''. Bounds-checked; anything unusual gives ''."""
+    try:
+        if len(payload) < 48 or payload[0] != 0x16 or payload[1] != 0x03 or payload[5] != 0x01:      # handshake record, handshake type ClientHello
+            return ""
+        i = 5 + 4 + 2 + 32                                                                             # record header, handshake header, version, random
+        i += 1 + payload[i]                                                                            # session id
+        i += 2 + struct.unpack("!H", payload[i:i + 2])[0]                                              # cipher suites
+        i += 1 + payload[i]                                                                            # compression methods
+        end = i + 2 + struct.unpack("!H", payload[i:i + 2])[0]
+        i += 2
+        end = min(end, len(payload))
+        while i + 4 <= end:
+            etype, elen = struct.unpack("!HH", payload[i:i + 4])
+            i += 4
+            if etype == 0 and elen >= 5:                                                               # server_name
+                nlen = struct.unpack("!H", payload[i + 3:i + 5])[0]
+                name = payload[i + 5:i + 5 + nlen]
+                if payload[i + 2] == 0 and 0 < nlen <= 253 and len(name) == nlen:
+                    return name.decode("ascii", "replace").lower().strip(".")
+                return ""
+            i += elen
+    except (IndexError, struct.error):
+        return ""
+    return ""
 
 
 def dns_qname(payload: bytes) -> str:
@@ -105,11 +133,14 @@ def _l4(buf, off, p, ts, wirelen, smac, dmac, src, dst) -> Packet:
     if p in (6, 17) and len(buf) >= off + 4:
         sport, dport = struct.unpack("!HH", buf[off:off + 4])
     qname = dns_qname(buf[off + 8:]) if p == 17 and dport == 53 else ""
-    httpreq = ""
+    httpreq = sni = ""
     if p == 6 and len(buf) >= off + 20:
         flags = buf[off + 13]
-        httpreq = http_request(buf[off + ((buf[off + 12] >> 4) * 4):])
-    return Packet(ts, wirelen, smac, dmac, src, dst, name, sport, dport, qname, flags, httpreq)
+        payload = buf[off + ((buf[off + 12] >> 4) * 4):]
+        httpreq = http_request(payload)
+        if payload[:1] == b"":
+            sni = tls_sni(payload)
+    return Packet(ts, wirelen, smac, dmac, src, dst, name, sport, dport, qname, flags, httpreq, sni)
 
 
 def iter_packets(path: str | Path, limit: int | None = None) -> Iterator[Packet]:

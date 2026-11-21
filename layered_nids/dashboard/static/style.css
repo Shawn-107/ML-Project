@@ -215,5 +215,13 @@ td.why{max-width:520px}
 .login .err{color:var(--critical);margin-top:12px;min-height:20px}
 
 @media (max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.span-8,.span-4,.span-6{grid-column:span 12}.bar-row{grid-template-columns:110px 1fr 80px}.hide-m{display:none}}
-@media (max-width:700px){header{padding:0 14px;gap:8px}.brand small,.hide-s{display:none}nav.tabs a{padding:8px 9px}main{padding:16px 14px 50px}}
+@media (max-width:700px){
+  header{height:auto;flex-wrap:wrap;padding:10px 14px;gap:8px}
+  .brand small,.hide-s,.spacer{display:none}
+  nav.tabs{order:5;width:100%;margin:2px 0 0;overflow-x:auto}nav.tabs a{padding:7px 10px}
+  .hbtn{padding:6px 10px;font-size:13px}
+  main{padding:16px 14px 50px}
+  h1{font-size:22px}
+  .toolbar .seg{overflow-x:auto;max-width:100%}
+}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0!important}}

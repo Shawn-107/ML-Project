@@ -28,3 +28,11 @@ Code: `layered_nids/signatures/trails.py` (`Trails.load`, `scan(..., trails=...)
   - Ours misses only indicators described as "suspicious", which we report as weak evidence instead. The sensor reports far fewer plain addresses and URLs; I did not investigate why (it applies its own filtering rules), so "ours finds more" must not be read as "ours is better": a sensor that stays quiet on weak indicators can be the better choice.
   - Normal traffic (the whole Mirai capture, 764,137 packets): ours 0 signature hits, sensor 0 indicator events.
 - Limits: the test traffic is synthetic and was built from the same indicator file the matcher uses; one capture of normal traffic; no whitelist of popular domains (the reference sensor has one); matching is on DNS names, addresses, and the HTTP request line only.
+
+## Additions on 2026-11-21 (after the first report)
+- ICMP sweep rule (one host sends ICMP to 15 or more different destinations in a window): found the ping-sweep capture that the other rules missed; 20 pings to ONE host do not fire it.
+- TLS server names: the packet reader now reads the server name from a TLS ClientHello (`Packet.sni`). Indicator domains are matched against it, so known-bad domains are caught in HTTPS too, and random-looking server names count in the random-name rule. Tested on crafted ClientHello bytes; the Mirai capture contains no TLS server names, so nothing was measured on real HTTPS traffic here.
+- DNS tunnelling rule (10 or more DNS names of 60+ characters in a window).
+- Popular-domain whitelist: `Trails.load_whitelist(file)` (or `data/trails/whitelist.txt`, used automatically by the pipeline) ignores indicator matches on those domains and their sub-domains.
+- The optional external sensor can be added to the pipeline with `--rules --external-sensor` when it is configured (see `signatures/external.py`); the indicator file in `data/trails/` is used automatically when present.
+- Still not covered: TLS fingerprints, user-agent rules, request bodies and headers, a ready-made whitelist (supply your own list).

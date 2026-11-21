@@ -20,7 +20,7 @@ import numpy as np
 import torch
 
 from layered_nids.anomaly.features import PacketFeatures, feature_names
-from layered_nids.anomaly.model import AE, AnomalyEnsemble, Prep
+from layered_nids.anomaly.model import AE, AnomalyEnsemble, Prep, TwoViewEnsemble
 from layered_nids.common.hosts import pick_internal
 from layered_nids.common.metrics import threshold_at_fpr
 from layered_nids.common.windows import fit_overdispersion, window_counts, windowed_evidence
@@ -58,7 +58,9 @@ class PacketAnomalyDetector:
         X_ca = self.features.run(calib)                                    # statistics keep running: no cold start at calibration
         half = len(X_ca) // 2
         tail_part, thr_part = X_ca[:half], X_ca[half:]                     # the empirical tail and the threshold use different data
-        self.ens = AnomalyEnsemble(**self.model_kw).fit(X_tr, tail_part, names=feature_names())
+        kw = dict(self.model_kw)
+        two = kw.pop("views", 1) == 2
+        self.ens = (TwoViewEnsemble if two else AnomalyEnsemble)(**kw).fit(X_tr, tail_part, names=feature_names())
         s_thr = self.ens.score(thr_part)
         self.threshold = threshold_at_fpr(s_thr, self.fpr)
         s_all = self.ens.score(X_ca)                                       # burstiness of false alarms on normal windows
@@ -104,35 +106,23 @@ class PacketAnomalyDetector:
                                  w, "packets", min_score, rho=rho)
 
     # ------------------------------------------------------------------------------------------------ save / load
-    def save(self, directory) -> Path:
-        self._need()
-        d = Path(directory)
+    @staticmethod
+    def _dump_ens(e, d: Path) -> dict:
         d.mkdir(parents=True, exist_ok=True)
-        e = self.ens
         torch.save({"nets": [n.state_dict() for n in e.nets],
                     "out_net": e.out_net.state_dict() if hasattr(e, "out_net") else None}, d / "weights.pt")
-        arrays = {"tails": getattr(e, "tails", np.zeros(0)), "r_hi": e.r_hi.numpy() if hasattr(e, "r_hi") else np.zeros(0), "refs": getattr(e, "refs", np.zeros(0))}
-        np.savez(d / "arrays.npz", **arrays)
-        meta = {"fpr": self.fpr, "window_s": self.window_s, "threshold": self.threshold, "mu": self.mu, "rho": self.rho,
-                "cfg": e.cfg, "groups": [g.tolist() for g in e.groups], "prep": e.prep.state(),
-                "n_features": self.features.n_features, "feature_names": feature_names(),
-                "sha256": {"weights.pt": _sha(d / "weights.pt"), "arrays.npz": _sha(d / "arrays.npz")}}
-        (d / "meta.json").write_text(json.dumps(meta))
-        return d
+        np.savez(d / "arrays.npz", tails=getattr(e, "tails", np.zeros(0)), r_hi=e.r_hi.numpy() if hasattr(e, "r_hi") else np.zeros(0),
+                 refs=getattr(e, "refs", np.zeros(0)))
+        return {"cfg": e.cfg, "groups": [g.tolist() for g in e.groups], "prep": e.prep.state()}
 
-    @classmethod
-    def load(cls, directory) -> "PacketAnomalyDetector":
-        d = Path(directory)
-        meta = json.loads((d / "meta.json").read_text())
-        for name, digest in meta["sha256"].items():
-            if _sha(d / name) != digest:
-                raise ValueError(f"{name} failed its integrity check (changed since it was saved)")
-        det = cls(meta["fpr"], meta["window_s"], **{k: v for k, v in meta["cfg"].items()})
-        e = AnomalyEnsemble(**meta["cfg"])
-        e.prep = Prep.from_state(meta["prep"])
-        e.groups = [np.asarray(g) for g in meta["groups"]]
+    @staticmethod
+    def _load_ens(m: dict, d: Path) -> AnomalyEnsemble:
+        cfg = {k: v for k, v in m["cfg"].items() if k != "views"}
+        e = AnomalyEnsemble(**cfg)
+        e.prep = Prep.from_state(m["prep"])
+        e.groups = [np.asarray(g) for g in m["groups"]]
         w = torch.load(d / "weights.pt", weights_only=True)                # tensors only: no pickled code
-        hr = meta["cfg"]["hidden_ratio"]
+        hr = cfg["hidden_ratio"]
         e.nets = []
         for g, sd in zip(e.groups, w["nets"]):
             net = AE(len(g), hr)
@@ -149,5 +139,43 @@ class PacketAnomalyDetector:
             e.tails = a["tails"]
         if len(a["refs"]):
             e.refs = a["refs"]
+        return e
+
+    def save(self, directory) -> Path:
+        self._need()
+        d = Path(directory)
+        d.mkdir(parents=True, exist_ok=True)
+        e = self.ens
+        two = isinstance(e, TwoViewEnsemble)
+        subs = {"a": self._dump_ens(e.a, d / "a"), "b": self._dump_ens(e.b, d / "b")} if two else {"main": self._dump_ens(e, d / "main")}
+        files = [f"{k}/{n}" for k in subs for n in ("weights.pt", "arrays.npz")]
+        if two:
+            np.savez(d / "views.npz", ra=e.refs[0], rb=e.refs[1])
+            files.append("views.npz")
+        meta = {"fpr": self.fpr, "window_s": self.window_s, "threshold": self.threshold, "mu": self.mu, "rho": self.rho,
+                "views": 2 if two else 1, "subs": subs, "n_features": self.features.n_features, "feature_names": feature_names(),
+                "sha256": {f: _sha(d / f) for f in files}}
+        (d / "meta.json").write_text(json.dumps(meta))
+        return d
+
+    @classmethod
+    def load(cls, directory) -> "PacketAnomalyDetector":
+        d = Path(directory)
+        meta = json.loads((d / "meta.json").read_text())
+        for name, digest in meta["sha256"].items():
+            if _sha(d / name) != digest:
+                raise ValueError(f"{name} failed its integrity check (changed since it was saved)")
+        subs = meta["subs"]
+        if meta["views"] == 2:
+            e = TwoViewEnsemble(**{k: v for k, v in subs["a"]["cfg"].items() if k not in ("scaling", "views")})
+            e.a, e.b = cls._load_ens(subs["a"], d / "a"), cls._load_ens(subs["b"], d / "b")
+            v = np.load(d / "views.npz")
+            e.refs = [v["ra"], v["rb"]]
+            model_kw = {k: x for k, x in subs["a"]["cfg"].items() if k not in ("scaling", "views")}
+            model_kw["views"] = 2
+        else:
+            e = cls._load_ens(subs["main"], d / "main")
+            model_kw = dict(subs["main"]["cfg"])
+        det = cls(meta["fpr"], meta["window_s"], **model_kw)
         det.ens, det.threshold, det.mu, det.rho = e, meta["threshold"], meta["mu"], meta["rho"]
         return det

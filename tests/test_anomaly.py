@@ -102,7 +102,7 @@ def test_save_load_roundtrip_and_tamper_check(trained, tmp_path):
     b.features = copy.deepcopy(det.features)
     b.features = copy.deepcopy(det.features)
     assert np.allclose(a.score_packets(ho[:100]), b.score_packets(ho[:100]), rtol=1e-4, atol=1e-4)
-    w = d / "weights.pt"
+    w = d / "main" / "weights.pt"
     w.write_bytes(w.read_bytes() + b"x")
     with pytest.raises(ValueError):
         PacketAnomalyDetector.load(d)
@@ -132,3 +132,27 @@ def test_injection_is_labelled_deterministic_and_needs_enough_hosts():
         inject(base[:50], KINDS, seed=0)
     with pytest.raises(ValueError):
         make_attack("nope", "192.168.2.1", "aa", 0.0, np.random.default_rng(0))
+
+
+def test_two_view_detector_scores_saves_and_loads(tmp_path):
+    import copy
+    tr, ca, ho = normal_traffic(4000, 0, 1000.0), normal_traffic(1200, 1, 1000.0 + 4000 / 25.0 + 1), normal_traffic(1200, 2, 1000.0 + 5200 / 25.0 + 2)
+    det = PacketAnomalyDetector(fpr=0.02, epochs=3, seed=0, views=2).fit(tr, ca)
+    a = copy.deepcopy(det)
+    s1 = a.score_packets(ho[:300])
+    assert np.isfinite(s1).all() and det.threshold > 0
+    d = det.save(tmp_path / "two")
+    b = PacketAnomalyDetector.load(d)
+    b.features = copy.deepcopy(det.features)
+    assert np.allclose(s1, b.score_packets(ho[:300]), rtol=1e-4, atol=1e-4)
+    f = d / "b" / "weights.pt"
+    f.write_bytes(f.read_bytes() + b"x")
+    with pytest.raises(ValueError):
+        PacketAnomalyDetector.load(d)
+
+
+def test_setup_check_reports_each_piece_with_a_fix():
+    from layered_nids import setup_check
+    rows = setup_check.checks()
+    assert rows and all(len(r) == 4 and isinstance(r[1], bool) and r[3] for r in rows)
+    assert any("UNSW-NB15 training file" in r[0] for r in rows)

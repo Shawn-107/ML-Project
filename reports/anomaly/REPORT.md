@@ -36,6 +36,14 @@ Recall at 1% FA / packet AUC / attacker host got an improbable window (p <= 1e-6
 - Slow beacon: still unseen at packet level; the first version and the reference catch a minority of episodes by luck of the window count; the rule layer finds regular new connections (3 of 3).
 - All three are above the 1% false-alarm target on uninvolved hosts (traffic drifts).
 
+## Sensitive profile (`PacketAnomalyDetector(views=2)`), added 2026-11-21
+Two ensembles see the same features through different scalings (log+quantile and plain min-max); each score is put on a rank scale against normal reference scores and the larger one counts. Chosen on the validation injections (6 injections x 2 model seeds), final numbers on the test injections (`benchmark_test_two_view.json`):
+- DNS burst: recall at equal false alarms 0.92 (default profile 0.66; first version and reference 0.88); AUC 0.926 (default 0.942, first version 0.959, reference 0.905).
+- Other attacks: horizontal scan 0.99 / AUC 0.967, port scan 0.99 / 0.985, floods and bulk upload about 1.00; slow beacon still unseen (episode 11%).
+- Costs: false-alert windows per hour 95.8 (default 60.0, first version 60.7, reference 95.8); normal packets of attacked hosts flagged 19.8% (default 8.9%). False alarms on uninvolved hosts 1.87% (same as the default).
+- So it removes the DNS-burst weakness against both older detectors but is noisier per window. It is an option, not the default; saving and loading work for both profiles.
+- Streaming speed after adding a numpy path for one-packet scoring: about 1,800 packets per second (was 830); batch scoring is much faster.
+
 ## Variants tried and rejected (validation seeds)
 - `tail_sum` scoring (sum of the rarest group-error tails, correlation or family-grouped groups, with and without a tail extension): recall 1.0 on floods and DNS at the policy threshold in some runs, but unstable (on the test seeds the family-grouped version found 0-24% of DNS-burst packets at equal false alarms) and prone to ties; a rounding bug in it was found and fixed (identical group errors compared with a tolerance), after which the numbers stayed about the same. Not used.
 - `hybrid` (max of both views on a common rank scale): more false-alert windows (94/hour) and worse DNS at equal false alarms. Not used.

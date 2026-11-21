@@ -50,9 +50,12 @@ class Prep:
         Z[:, self.log] = np.log1p(np.maximum(Z[:, self.log], 0.0))
         return Z
 
-    def transform(self, X: np.ndarray) -> torch.Tensor:
+    def transform_np(self, X: np.ndarray) -> np.ndarray:
         Z = (self._log(np.asarray(X, dtype=np.float64)) - self.lo) / self.span
-        return torch.as_tensor(np.clip(Z, -CAP, CAP).astype(np.float32))
+        return np.clip(Z, -CAP, CAP).astype(np.float32)
+
+    def transform(self, X: np.ndarray) -> torch.Tensor:
+        return torch.as_tensor(self.transform_np(X))
 
     def state(self) -> dict:
         return {"mode": self.mode, "log": self.log.tolist(), "lo": self.lo.tolist(), "span": self.span.tolist()}
@@ -124,6 +127,7 @@ class AnomalyEnsemble:
         """Train on normal rows. `X_tail` (more normal rows, NOT used for training) gives the empirical tail of every group's
         error for score_mode 'tail_sum'; if omitted the training rows are used (optimistic)."""
         c = self.cfg
+        self._npc = None                                       # the numpy copy of the weights is rebuilt after (re)training
         torch.manual_seed(c["seed"])
         gen = torch.Generator().manual_seed(c["seed"])
         X_train = np.asarray(X_train, dtype=np.float64)
@@ -155,11 +159,34 @@ class AnomalyEnsemble:
                 self.refs = np.vstack([np.sort(self._out_score(r)), np.sort(self._tail_score(r))])
         return self
 
+    def _np_nets(self):
+        """Weights of every small network as numpy arrays (built once): rebuilding a row with plain numpy is much faster than a torch call per packet."""
+        if getattr(self, "_npc", None) is None:
+            ex = lambda n: (n.enc.weight.detach().numpy().T.copy(), n.enc.bias.detach().numpy().copy(), n.dec.weight.detach().numpy().T.copy(), n.dec.bias.detach().numpy().copy())
+            self._npc = ([ex(n) for n in self.nets], ex(self.out_net) if hasattr(self, "out_net") else None)
+        return self._npc
+
+    @staticmethod
+    def _ae_rmse_np(w, x):
+        We, be, Wd, bd = w
+        h = 1.0 / (1.0 + np.exp(-(x @ We + be)))
+        y = 1.0 / (1.0 + np.exp(-(h @ Wd + bd)))
+        return np.sqrt(((y - x) ** 2).mean(axis=1))
+
+    def _group_errors_np(self, X: np.ndarray) -> np.ndarray:
+        Z = self.prep.transform_np(X)
+        nets, _ = self._np_nets()
+        return np.stack([self._ae_rmse_np(w, Z[:, g]) for w, g in zip(nets, self.groups)], axis=1).astype(np.float32)
+
     def group_errors(self, X: np.ndarray, chunk: int = 100_000) -> np.ndarray:
+        if len(X) <= 256:
+            return self._group_errors_np(np.asarray(X, dtype=np.float64))
         out = [self._group_rmse(self.prep.transform(X[i:i + chunk])).numpy() for i in range(0, len(X), chunk)]
         return np.concatenate(out) if out else np.zeros((0, len(self.groups)))
 
     def _out_score(self, R: np.ndarray) -> np.ndarray:
+        if len(R) <= 256:
+            return self._ae_rmse_np(self._np_nets()[1], R.astype(np.float32) / self.r_hi.numpy()).astype(np.float64)
         Rt = torch.as_tensor((R.astype(np.float32)) / self.r_hi.numpy())
         return rmse(self.out_net, Rt).numpy().astype(np.float64)
 
@@ -201,3 +228,25 @@ class AnomalyEnsemble:
         R = self.group_errors(np.asarray(x, dtype=np.float64).reshape(1, -1))
         order = np.argsort(R[0])[::-1][:top]
         return [", ".join(names[i] for i in self.groups[j][:3]) for j in order]
+
+
+class TwoViewEnsemble:
+    """Two ensembles that look at the same features through different scalings (log+quantile and plain min-max), combined by "whichever view is
+    more surprised": each view's score is put on a rank scale against normal reference scores first (-log of the share of normal rows at
+    least as high). Same interface as AnomalyEnsemble (fit, score)."""
+
+    def __init__(self, **kw):
+        kw.pop("scaling", None)
+        self.a = AnomalyEnsemble(scaling="quantile_log", **kw)
+        self.b = AnomalyEnsemble(scaling="minmax", **kw)
+        self.cfg = dict(self.a.cfg, views=2)
+
+    def fit(self, X_train, X_tail=None, names=None) -> "TwoViewEnsemble":
+        self.a.fit(X_train, X_tail, names)
+        self.b.fit(X_train, X_tail, names)
+        ref = X_tail if X_tail is not None else X_train
+        self.refs = [np.sort(self.a.score(ref)), np.sort(self.b.score(ref))]
+        return self
+
+    def score(self, X: np.ndarray) -> np.ndarray:
+        return np.maximum(AnomalyEnsemble._surprise(self.a.score(X), self.refs[0]), AnomalyEnsemble._surprise(self.b.score(X), self.refs[1]))

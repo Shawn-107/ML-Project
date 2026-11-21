@@ -41,6 +41,7 @@ class Trails:
         self.regexes: list = []           # (compiled, source)
         self.path: Path | None = None
         self._info: dict = {}
+        self.whitelist: set = set()       # popular domains whose matches are ignored (see load_whitelist)
 
     def __len__(self):
         return len(self.ips) + len(self.ip_ports) + len(self.domains) + len(self.paths) + len(self.host_paths) + len(self.regexes)
@@ -61,6 +62,20 @@ class Trails:
         for e in entries:
             t._add(e)
         return t
+
+    def load_whitelist(self, path) -> int:
+        """Ignore indicator matches on these domains and all their sub-domains. One domain per line, '#' starts a comment; a CSV with the domain
+        in the last column (rank,domain) also works. Returns how many domains are loaded."""
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                d = line.split("#", 1)[0].strip().split(",")[-1].strip().lower().strip(".")
+                if d and "." in d and " " not in d:
+                    self.whitelist.add(d)
+        return len(self.whitelist)
+
+    def _whitelisted(self, name: str) -> bool:
+        parts = name.strip(".").lower().split(".")
+        return any(".".join(parts[i:]) in self.whitelist for i in range(len(parts) - 1))
 
     def _add(self, s: str) -> None:
         if not s:
@@ -114,7 +129,11 @@ class Trails:
             hp = f"{host}{path}".rstrip("/")
             if hp in self.host_paths:
                 hits.append((hp, "host+path"))
+        if p.sni:
+            names.append(p.sni)
         for n in names:
+            if self.whitelist and self._whitelisted(n):
+                continue
             d = self._domain_hit(n)
             if d:
                 hits.append((d, "domain"))

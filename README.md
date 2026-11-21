@@ -9,12 +9,19 @@ A network intrusion detection system where machine learning is the core, combine
 
 MSc AI/ML coursework (Advanced Machine Learning, MAI511-2). Full brief, measured results and honest limits: `CLAUDE.md`. Final report: `reports/FINAL_REPORT.md`.
 
-## Run (Windows, Python 3.13 venv with `requirements-313.txt`)
-- Tests: `python -m pytest tests`
-- Pipeline on a pcap: `python -m layered_nids.pipeline.run --pcap data/mirai/mirai.pcap --rules`  (writes `reports/pipeline/<name>.json`, `.alerts.jsonl`, `.events.jsonl`)
-- CSV flow files: `python -m layered_nids.csvmode FILE.csv`  (train the models first: `python -m layered_nids.csvmode.models train`)
+## Set up from a fresh clone (Windows, Python 3.13)
+1. Environment: follow the build lines at the top of `requirements-313.txt` (a Python 3.13 venv, `pip install -r requirements-313.txt`, then `pip install --no-deps -e . -e legacy/nids_backend`).
+2. Data: put the files listed in `data/SOURCES.md` where it says (UNSW-NB15 files in `data/unsw/` are required; the Mirai capture, DGA list, NetFlow file and an indicator file are optional).
+3. Check what is missing: `python -m layered_nids.setup_check` prints each missing piece and the command that fixes it.
+4. Train the models (they are not in the repository): `python -m layered_nids.csvmode.models train` (add `--which unsw34` to train only the UNSW flow model).
+5. Tests: `python -m pytest tests` (tests that need data you did not supply are skipped or fail with a clear message from step 3).
+
+## Run
+- Pipeline on a pcap: `python -m layered_nids.pipeline.run --pcap data/mirai/mirai.pcap --rules`  (writes `reports/pipeline/<name>.json`, `.alerts.jsonl`, `.events.jsonl`; an indicator file in `data/trails/` is used automatically)
+- CSV flow files: `python -m layered_nids.csvmode FILE.csv`
 - Dashboard: `python -m layered_nids.dashboard --init-user NAME` (prints where the random password is stored), then
-  `python -m layered_nids.dashboard --data reports/pipeline --port 8338` and open http://127.0.0.1:8338 (localhost only).
+  `python -m layered_nids.dashboard --data reports/pipeline --port 8338` and open http://127.0.0.1:8338 (localhost only). Press Ctrl+K in the page for the command palette.
+- Packet detector profiles: the default is robust (fewest false-alert windows); `PacketAnomalyDetector(views=2)` is more sensitive to rate-type attacks such as DNS bursts at the cost of more false-alert windows (`reports/anomaly/REPORT.md`).
 
 ## Not in this repository (by design)
 - Datasets (UNSW-NB15, DGA lists, the Mirai capture): see `data/SOURCES.md`.

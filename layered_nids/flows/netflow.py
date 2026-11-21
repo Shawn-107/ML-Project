@@ -23,11 +23,22 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupShuffleSplit
 
 from layered_nids.common.metrics import calibration
-from layered_nids.common.paths import REPORTS
+from layered_nids.common.paths import DATA, REPORTS
 from layered_nids.flows.evaluate import evaluate_scores
 from layered_nids.flows.models import HGB
 
-CSV = Path(r"C:\ML project\data\crossds\nfton\NF-ToN-IoT-v2-test.csv")
+def _netflow_csv() -> Path:
+    """NF-ToN-IoT v2 file: NIDS_NETFLOW_CSV, else data/netflow/NF-ToN-IoT-v2-test.csv, else the earlier project's copy if it exists on this machine."""
+    import os
+    env = os.environ.get("NIDS_NETFLOW_CSV")
+    if env:
+        return Path(env)
+    local = DATA / "netflow" / "NF-ToN-IoT-v2-test.csv"
+    old = Path(r"C:\ML project\data\crossds\nfton\NF-ToN-IoT-v2-test.csv")
+    return local if local.exists() or not old.exists() else old
+
+
+CSV = _netflow_csv()
 ID_COLS = ["IPV4_SRC_ADDR", "IPV4_DST_ADDR", "L4_SRC_PORT"]
 LABELS = ["Label", "Attack"]
 # Computable exactly from packet headers by definition (sizes, counts, flag union, TTL, window, ICMP type, duration, protocol, dst port):

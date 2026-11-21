@@ -24,10 +24,9 @@ Everything here was checked on 2026-11-19. "Verified" means checked by us; "not 
 - Caveat: benign side is a top-sites list, so "real vs generated" is easier here than on real DNS traffic.
 
 ## mirai/  (L3 packets)
-- `reference/Mirai-py/mirai.zip` (in the cloned MIT-licensed repo) holds `mirai.pcap` (62,859,800 bytes), extracted to
-  `data/mirai/mirai_example/` (SHA-256 DA69165A7B47353DE854E82B3E8C88741383BF94099DB2AEAAC35D27C7C921FE). It has NO labels.
+- The public Mirai network-attack capture (UCI dataset #516, DOI 10.24432/C5D90Q, CC BY 4.0, Mirsky et al.) as `data/mirai/mirai.pcap` (62,859,800 bytes, SHA-256 DA69165A7B47353DE854E82B3E8C88741383BF94099DB2AEAAC35D27C7C921FE when measured here). The file has NO labels. Put it there yourself (the dataset page and the original authors' repository both provide it).
 - It is the FULL Mirai capture, not just the demo subset (measured + read from the paper in the repo):
-  764,137 packets, 7,137 s (~119 min). The Mirai paper (Table III, `reference/Mirai-py/Mirai paper.pdf`) lists Mirai as
+  764,137 packets, 7,137 s (~119 min). The dataset paper (Table III) lists Mirai as
   764,137 packets, train 52.0 min, execute 66.9 min. The first 52.0 min = 85,380 packets is the paper's clean training phase.
   The repo demo's "first 70,000 clean" is a rougher, more conservative statement.
 - Traffic profile (measured, not labels): minutes 0-72 steady (~13k packets per 8 min, ARP 4-7%, ~50 destinations);
@@ -38,3 +37,11 @@ Everything here was checked on 2026-11-19. "Verified" means checked by us; "not 
   but it is distributed as one 17.7 GB zip. NOT downloaded: this machine fails TLS verification for archive.ics.uci.edu
   (strict X.509 check) and the check was not bypassed. Status: not verified, not downloaded.
 - UCI states packets are truncated to 200 bytes and labels are 0/1 per packet.
+
+## netflow/  (optional: NetFlow flow model)
+- `NF-ToN-IoT-v2-test.csv` (University of Queensland NetFlow v2 datasets). Put it in `data/netflow/` or set `NIDS_NETFLOW_CSV` to its path. Only needed to retrain the NetFlow model.
+
+## trails/  (optional: known-bad indicator data)
+- `trails.csv` and an optional `whitelist.txt` of popular domains (one per line, or `rank,domain`). Local files, never committed. The community indicator data is free for defending
+  your own systems and for research and education; it must not be redistributed or built into a service for others. Without it the rule layer still works (patterns and behaviour rules), it just
+  cannot match known-bad indicators.

@@ -86,9 +86,13 @@ def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None, trails=No
         if c.dns >= cfg.dns_min:
             out.append(Evidence("rules", h, ts(w), count_score(c.dns, cfg.dns_min), f"{h} sent {c.dns} DNS queries in {cfg.window_s:g}s",
                                 {"signature": False, "trail": "dns_burst", "queries": c.dns}))
+        if c.long_names >= cfg.dns_tunnel_min:
+            out.append(Evidence("rules", h, ts(w), count_score(c.long_names, cfg.dns_tunnel_min),
+                                f"{h} sent {c.long_names} very long DNS names in {cfg.window_s:g}s (data smuggled in lookups?)",
+                                {"signature": False, "trail": "dns_tunnel", "names": c.long_names}))
         if c.random_names >= cfg.dns_random_min:
             out.append(Evidence("rules", h, ts(w), count_score(c.random_names, cfg.dns_random_min),
-                                f"{h} asked for {c.random_names} random-looking names in {cfg.window_s:g}s (e.g. {c.random_examples[0]})",
+                                f"{h} asked for {c.random_names} random-looking names (DNS or TLS) in {cfg.window_s:g}s (e.g. {c.random_examples[0]})",
                                 {"signature": False, "trail": "dns_random", "names": c.random_names, "examples": c.random_examples}))
     for h, dst, port, gap, cv, n, t0, t1 in beaconing(packets, cfg):
         out.append(Evidence("rules", h, t1, 0.6, f"{h} contacted {dst}:{port} {n} times about every {gap:.0f}s (spread {cv:.0%}): beacon-like",

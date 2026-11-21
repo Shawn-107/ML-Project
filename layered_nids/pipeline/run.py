@@ -128,6 +128,7 @@ def main(argv=None):
     ap.add_argument("--pcap", required=True)
     ap.add_argument("--name", default=None, help="report name (default: pcap file name)")
     ap.add_argument("--rules", action="store_true", help="also run the rules layer (signatures and heuristics) on the packets")
+    ap.add_argument("--external-sensor", action="store_true", help="with --rules: also run the external sensor if it is configured (NIDS_SENSOR_* settings)")
     ap.add_argument("--cache", default=None, help="packet scores cache (.npz); default reports/pipeline/<name>_packet_scores.npz")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--train", type=int, default=DEFAULT_TRAIN, help="packets the detector learns from (must be clean traffic)")
@@ -157,7 +158,7 @@ def main(argv=None):
 
     ev_m = []
     if a.rules:
-        ev_m = rules_evidence(iter_packets(a.pcap, a.limit))
+        ev_m = rules_evidence(iter_packets(a.pcap, a.limit), external_pcap=a.pcap if a.external_sensor else None)
         print(f"rules: {len(ev_m)} evidence items for internal hosts "
               f"(signature hits {sum(is_signature(e) for e in ev_m)}, heuristics {sum(not is_signature(e) for e in ev_m)})", flush=True)
 
