@@ -26,6 +26,8 @@ class Packet(NamedTuple):
     sport: int
     dport: int
     qname: str = ""    # DNS query name for UDP queries to port 53 (lower-case, no trailing dot), else ""
+    flags: int = 0     # TCP flag byte (SYN = 0x02, ACK = 0x10, ...), 0 for other protocols
+    httpreq: str = ""  # "METHOD host path" for the first line of a plain HTTP request (at most 300 characters), else ""
 
 
 def dns_qname(payload: bytes) -> str:
@@ -42,6 +44,27 @@ def dns_qname(payload: bytes) -> str:
         labels.append(payload[i + 1:i + 1 + n].decode("ascii", "replace"))
         i += 1 + n
     return ""
+
+
+_HTTP_METHODS = (b"GET ", b"POST ", b"HEAD ", b"PUT ", b"DELETE ", b"OPTIONS ", b"PATCH ", b"CONNECT ")
+
+
+def http_request(payload: bytes) -> str:
+    """"METHOD host path" from the start of a TCP payload that looks like an HTTP request, else ''. Only the first 600 bytes
+    are looked at; a request split over several packets is not reassembled."""
+    if not payload.startswith(_HTTP_METHODS):
+        return ""
+    head = payload[:600].split(b"\r\n\r\n", 1)[0]
+    lines = head.split(b"\r\n")
+    parts = lines[0].split(b" ")
+    if len(parts) < 2:
+        return ""
+    host = ""
+    for ln in lines[1:]:
+        if ln[:5].lower() == b"host:":
+            host = ln[5:].strip().decode("ascii", "replace").lower()
+            break
+    return f"{parts[0].decode('ascii', 'replace')} {host} {parts[1].decode('ascii', 'replace')}"[:300]
 
 
 def _mac(b: bytes) -> str:
@@ -78,11 +101,15 @@ _PROTO = {6: "tcp", 17: "udp", 1: "icmp", 58: "icmp"}
 
 def _l4(buf, off, p, ts, wirelen, smac, dmac, src, dst) -> Packet:
     name = _PROTO.get(p, f"ip{p}")
-    sport = dport = 0
+    sport = dport = flags = 0
     if p in (6, 17) and len(buf) >= off + 4:
         sport, dport = struct.unpack("!HH", buf[off:off + 4])
     qname = dns_qname(buf[off + 8:]) if p == 17 and dport == 53 else ""
-    return Packet(ts, wirelen, smac, dmac, src, dst, name, sport, dport, qname)
+    httpreq = ""
+    if p == 6 and len(buf) >= off + 20:
+        flags = buf[off + 13]
+        httpreq = http_request(buf[off + ((buf[off + 12] >> 4) * 4):])
+    return Packet(ts, wirelen, smac, dmac, src, dst, name, sport, dport, qname, flags, httpreq)
 
 
 def iter_packets(path: str | Path, limit: int | None = None) -> Iterator[Packet]:
