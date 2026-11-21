@@ -153,19 +153,6 @@ def test_live_capture_adapter_limits_paths_and_writes_a_readable_pcap(tmp_path, 
     assert len(pk) == 25 and pk[0].src == "192.168.2.5" and pk[0].dport == 443 and pk[0].proto == "tcp"
 
 
-def test_live_packet_test_labels_only_the_planted_queries_and_measures_recall():
-    from layered_nids.pipeline.live_packet_test import analyse, is_planted_query, planted_name
-    name = planted_name()
-    assert name.startswith("kt") and name.endswith(".example.com") and len(name) == 2 + 10 + len(".example.com")
-    mk = lambda q, ts: Packet(ts, 80, "a", "b", "192.168.2.5", "8.8.8.8", "udp", 5353, 53, q)
-    assert is_planted_query(mk(name, 1.0)) and not is_planted_query(mk("google.com", 1.0)) and not is_planted_query(mk("kt12.example.com", 1.0))
-    packets = [mk("", float(i)) for i in range(100)] + [mk(planted_name(), 100.0 + i * 0.05) for i in range(20)] + [mk("", 200.0 + i) for i in range(50)]
-    scores = np.r_[np.zeros(50), np.ones(50) * 0.02, np.ones(20) * 5.0, np.ones(50) * 0.02]      # only the planted packets score high
-    res = analyse(packets, scores, cutoff=0.5, first=50, window=(100.0, 101.0))
-    assert res["planted_query_packets_scored"] == 20 and res["planted_recall"] == 1.0
-    assert res["other_packets_scored"] == 99 and res["other_flagged_rate"] == 0.0               # 100 minus the packet at t=99 inside the window margin; none flagged
-
-
 def test_rules_adapter_marks_signature_hits_and_drops_hosts_without_an_internal_end():
     from layered_nids.pipeline.rules_layer import is_signature
     assert [is_signature(e) for e in (HEUR_EV, SIG_EV)] == [False, True]

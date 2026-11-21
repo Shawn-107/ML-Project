@@ -1,5 +1,7 @@
 """Live self-test: does the capture -> detection chain work on REAL traffic?
 
+NOT TO BE RUN unless the owner asks: the owner decided on 2026-11-21 that the project is tested on datasets (pcap and CSV files), not on live captures.
+
   python -m layered_nids.pipeline.live_selftest [--seconds 20] [--keep]
 
 What it does, in order:
