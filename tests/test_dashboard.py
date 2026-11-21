@@ -70,6 +70,10 @@ def test_everything_needs_a_session(srv):
     for p in ("/nids/api/alerts", "/nids/api/summary", "/api/info", "/nids/api/download?id=" + "0" * 32 + "&kind=scored"):
         assert call(base, p)[0] == 401
     assert call(base, "/login")[0] == 200                         # the sign-in page itself is public
+    for asset, ctype in (("/static/style.css", "text/css"), ("/static/login.js", "javascript")):
+        st, body, hd = call(base, asset)                          # ...and so are exactly the two files it needs to look and work right
+        assert st == 200 and ctype in hd["Content-Type"] and not body.lstrip().startswith(b"<!doctype")
+    assert call(base, "/static/app.js")[0] == 302 and call(base, "/static/index.html")[0] == 302
 
 
 def test_wrong_password_unknown_user_and_cookie_flags(srv):

@@ -7,20 +7,43 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.500-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
-<div class="login-page">
-  <form class="login" id="f" autocomplete="on">
-    <div class="brand">
+<body class="login-body">
+<canvas id="net" aria-hidden="true"></canvas>
+<div class="login-grid">
+  <section class="hero-side">
+    <div class="brand big">
       <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
-      <div>NIDS<small>layered network intrusion detection</small></div>
+      <div>NIDS</div>
     </div>
-    <label for="u">User</label>
-    <input id="u" autocomplete="username" required autofocus>
-    <label for="p">Password</label>
-    <input id="p" type="password" autocomplete="current-password" required>
-    <button class="btn" type="submit">Sign in</button>
-    <div class="err" id="e" role="alert"></div>
-  </form>
+    <h1 class="hero-h">See the whole network<br><span class="grad">before it sees you.</span></h1>
+    <p class="hero-p">Layered intrusion detection: a packet anomaly model, signatures and behaviour rules, and a flow classifier &mdash; fused into one alert per host.</p>
+    <ul class="chips">
+      <li><i style="background:var(--c-packets)"></i>Packet anomaly model</li>
+      <li><i style="background:var(--c-rules)"></i>Signatures &amp; rules</li>
+      <li><i style="background:var(--c-flows)"></i>Flow model</li>
+    </ul>
+    <div class="status-line"><span class="dot"></span> Local sensor data &middot; this page is reachable from this computer only</div>
+  </section>
+
+  <section class="card-side">
+    <form class="login" id="f" autocomplete="on" novalidate>
+      <h2>Sign in</h2>
+      <p class="login-sub">Use the account created with <span class="mono">--init-user</span>.</p>
+      <label for="u">User</label>
+      <input id="u" autocomplete="username" required autofocus spellcheck="false">
+      <label for="p">Password</label>
+      <div class="pw">
+        <input id="p" type="password" autocomplete="current-password" required spellcheck="false">
+        <button type="button" id="eye" aria-label="show password" title="Show or hide the password">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div class="caps" id="caps" hidden>Caps Lock is on</div>
+      <button class="btn" type="submit" id="go"><span id="go-t">Sign in</span><i class="spin" aria-hidden="true"></i></button>
+      <div class="err" id="e" role="alert"></div>
+      <div class="login-foot"><span>Session cookie &middot; locks after 5 wrong tries</span><button type="button" id="theme" class="linklike">Theme</button></div>
+    </form>
+  </section>
 </div>
 <script src="/static/login.js"></script>
 </body>

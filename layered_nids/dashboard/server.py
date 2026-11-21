@@ -33,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 STATE = ROOT / "local"
 COOKIE = "nids_session"
+PUBLIC_ASSETS = ("/static/style.css", "/static/login.js")          # nothing else is served without a session
 MAX_JSON = 5_000_000
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
@@ -187,6 +188,8 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
                 if not tok:
                     return self._json(401, {"error": "wrong user or password (or too many attempts: wait a minute)"})
                 return self._json(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800")])
+            if method == "GET" and path in PUBLIC_ASSETS:                  # the sign-in page needs its own style and script before anyone is signed in
+                return self._static(STATIC, path[len("/static/"):])
             user = sessions.user(self._token())
             if path == "/logout" and method == "POST":
                 sessions.logout(self._token())
