@@ -40,6 +40,21 @@ VARIANTS = {                                    # own variants (validated, then 
     "nids_v2_tail_sum_top3": dict(score_mode="tail_sum", topk=3),
     "nids_v2_tail_sum_all": dict(score_mode="tail_sum", topk=100),
     "nids_v2_tail_sum_top3_noise": dict(score_mode="tail_sum", topk=3, noise=0.05),
+    "nids_v2_family_output_ae": dict(score_mode="output_ae", grouping="family"),
+    "nids_v2_family_tail_top3": dict(score_mode="tail_sum", topk=3, grouping="family"),
+    "nids_v2_family_hybrid": dict(score_mode="hybrid", topk=3, grouping="family"),
+    "nids_v2_corr_hybrid": dict(score_mode="hybrid", topk=3),
+    "nids_v2_family_tail_top2": dict(score_mode="tail_sum", topk=2, grouping="family"),
+    "nids_v2_family_tail_top3_ext": dict(score_mode="tail_sum", topk=3, grouping="family"),
+    "nids_v2_family_tail_top5": dict(score_mode="tail_sum", topk=5, grouping="family"),
+    "nids_v2_corr_tail_top3_ext": dict(score_mode="tail_sum", topk=3),
+    "nids_v2_family_tail_top8": dict(score_mode="tail_sum", topk=8, grouping="family"),
+    "nids_v2_family_hybrid8": dict(score_mode="hybrid", topk=8, grouping="family"),
+    "nids_v2_corr_hybrid8": dict(score_mode="hybrid", topk=8, grouping="correlation"),
+    "nids_v2_corr_output_ae": dict(score_mode="output_ae", grouping="correlation"),
+    "nids_v2_minmax_output_ae": dict(score_mode="output_ae", grouping="correlation", scaling="minmax"),
+    "nids_v2_minmax_family_output_ae": dict(score_mode="output_ae", grouping="family", scaling="minmax"),
+    "nids_v2_family_tail_top12": dict(score_mode="tail_sum", topk=12, grouping="family"),
 }
 
 
@@ -128,11 +143,13 @@ def evaluate(model, hold, inj_seeds):
         clean = np.array([(p.src not in involved and p.dst not in involved) for p in stream]) & normal
         res = {"seed": s, "false_alarm_rate_on_normal": float(flagged[normal].mean()),
                "false_alarm_rate_uninvolved": float(flagged[clean].mean()), "kinds": {}}
+        thr_or = float(np.quantile(scores[clean], 0.99))            # oracle threshold: 1% of uninvolved normal packets of THIS stream; same rule for every model
+        res["false_alarm_rate_uninvolved_at_policy"] = float(flagged[clean].mean())
         for ep in episodes:
             m = labels == ep["kind"]
             y = np.r_[np.zeros(normal.sum()), np.ones(m.sum())]
             auc = float(roc_auc_score(y, np.r_[scores[normal], scores[m]]))
-            res["kinds"][ep["kind"]] = {"packet_recall": float(flagged[m].mean()), "packet_auc": auc,
+            res["kinds"][ep["kind"]] = {"packet_recall": float(flagged[m].mean()), "recall_at_1pct_fa": float((scores[m] >= thr_or).mean()), "packet_auc": auc,
                                         "episode_detected": bool(episode_detected(stream, flagged, ep))}
         bad, hours = false_alert_windows(stream, flagged, labels, episodes)
         res["false_alert_windows"], res["hours"] = bad, hours
@@ -146,7 +163,7 @@ def summarise(all_rows: list) -> dict:
            "false_alert_windows_per_hour": [r["false_alert_windows"] / r["hours"] for r in all_rows], "kinds": {}}
     for kind in KINDS:
         rs = [r["kinds"][kind] for r in all_rows]
-        out["kinds"][kind] = {m: [x[m] for x in rs] for m in ("packet_recall", "packet_auc", "episode_detected")}
+        out["kinds"][kind] = {m: [x[m] for x in rs] for m in ("packet_recall", "recall_at_1pct_fa", "packet_auc", "episode_detected")}
     ms = lambda v: {"mean": float(np.mean(v)), "std": float(np.std(v)), "n": len(v)}
     return {"false_alarm_rate_on_normal": ms(out["false_alarm_rate_on_normal"]),
             "false_alarm_rate_uninvolved": ms(out["false_alarm_rate_uninvolved"]),
@@ -159,11 +176,13 @@ def main(argv=None):
     ap.add_argument("--stage", choices=["validate", "test"], required=True)
     ap.add_argument("--models", default=None, help="comma list; default: all variants (validate) or v1,original,<best v2> (test)")
     ap.add_argument("--model-seeds", type=int, default=None)
+    ap.add_argument("--n-inj", type=int, default=None, help="number of injection seeds (default 2 for validate, 3 for test)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
     train, calib, hold = load_clean()
     print(f"packets: train {len(train):,} | calibration {len(calib):,} | hold {len(hold):,}", flush=True)
-    inj = [100, 101] if a.stage == "validate" else [0, 1, 2]
+    n_inj = a.n_inj or (2 if a.stage == "validate" else 3)
+    inj = list(range(100, 100 + n_inj)) if a.stage == "validate" else list(range(n_inj))
     mseeds = range(a.model_seeds or (1 if a.stage == "validate" else 3))
     names = a.models.split(",") if a.models else (list(VARIANTS) if a.stage == "validate" else ["nids_v1"])
     results = {}
@@ -172,6 +191,12 @@ def main(argv=None):
         for ms in mseeds:
             if name in VARIANTS:
                 m = Own(name, ms, **VARIANTS[name])
+            elif name == "kitsune_original":                 # comparison only: needs a LOCAL file that is never committed
+                try:
+                    from layered_nids.anomaly._reference_original import Original
+                except ImportError:
+                    raise SystemExit("the original-detector column needs the local, git-ignored _reference_original.py")
+                m = Original(ms)
             elif name == "nids_v1":
                 m = First(ms)
             else:
@@ -185,7 +210,7 @@ def main(argv=None):
               f"packets of hosts not involved in any attack {results[name]['summary']['false_alarm_rate_uninvolved']['mean']:.2%} | "
               f"false alert windows/hour {results[name]['summary']['false_alert_windows_per_hour']['mean']:.1f}")
         for kind in KINDS:
-            print(f"  {kind:10s} recall {k[kind]['packet_recall']['mean']:.2f}+-{k[kind]['packet_recall']['std']:.2f}  "
+            print(f"  {kind:10s} recall {k[kind]['packet_recall']['mean']:.2f}+-{k[kind]['packet_recall']['std']:.2f}  at 1% FA {k[kind]['recall_at_1pct_fa']['mean']:.2f}  "
                   f"AUC {k[kind]['packet_auc']['mean']:.3f}  episode detected {k[kind]['episode_detected']['mean']:.2f}", flush=True)
     out = Path(a.out or REPORTS / "anomaly" / f"benchmark_{a.stage}.json")
     out.parent.mkdir(parents=True, exist_ok=True)

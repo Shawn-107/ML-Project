@@ -58,7 +58,7 @@ class PacketAnomalyDetector:
         X_ca = self.features.run(calib)                                    # statistics keep running: no cold start at calibration
         half = len(X_ca) // 2
         tail_part, thr_part = X_ca[:half], X_ca[half:]                     # the empirical tail and the threshold use different data
-        self.ens = AnomalyEnsemble(**self.model_kw).fit(X_tr, tail_part)
+        self.ens = AnomalyEnsemble(**self.model_kw).fit(X_tr, tail_part, names=feature_names())
         s_thr = self.ens.score(thr_part)
         self.threshold = threshold_at_fpr(s_thr, self.fpr)
         s_all = self.ens.score(X_ca)                                       # burstiness of false alarms on normal windows
@@ -78,7 +78,7 @@ class PacketAnomalyDetector:
     def process(self, p) -> float:
         """Score one packet; packets must arrive in capture order."""
         self._need()
-        return float(self.ens.score(self.features.update(p).reshape(1, -1))[0])
+        return float(self.ens.score(self.features.update(p).astype(np.float32).reshape(1, -1))[0])      # float32 like the batch path, so both give the same steps of the tail score
 
     def warm(self, packets) -> None:
         """Feed normal packets to the statistics without scoring (after load, or to refresh state)."""
@@ -111,7 +111,7 @@ class PacketAnomalyDetector:
         e = self.ens
         torch.save({"nets": [n.state_dict() for n in e.nets],
                     "out_net": e.out_net.state_dict() if hasattr(e, "out_net") else None}, d / "weights.pt")
-        arrays = {"tails": getattr(e, "tails", np.zeros(0)), "r_hi": e.r_hi.numpy() if hasattr(e, "r_hi") else np.zeros(0)}
+        arrays = {"tails": getattr(e, "tails", np.zeros(0)), "r_hi": e.r_hi.numpy() if hasattr(e, "r_hi") else np.zeros(0), "refs": getattr(e, "refs", np.zeros(0))}
         np.savez(d / "arrays.npz", **arrays)
         meta = {"fpr": self.fpr, "window_s": self.window_s, "threshold": self.threshold, "mu": self.mu, "rho": self.rho,
                 "cfg": e.cfg, "groups": [g.tolist() for g in e.groups], "prep": e.prep.state(),
@@ -145,7 +145,9 @@ class PacketAnomalyDetector:
             e.out_net.load_state_dict(w["out_net"])
             e.out_net.eval()
             e.r_hi = torch.as_tensor(a["r_hi"])
-        else:
+        if len(a["tails"]):
             e.tails = a["tails"]
+        if len(a["refs"]):
+            e.refs = a["refs"]
         det.ens, det.threshold, det.mu, det.rho = e, meta["threshold"], meta["mu"], meta["rho"]
         return det

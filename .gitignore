@@ -46,3 +46,6 @@ local/
 
 # local-only comparison copy of a reference detector (never commit; restore with: cp -r reference/vendored/realtools layered_nids/realtools)
 layered_nids/realtools/
+
+# local-only reference column of the benchmark
+layered_nids/anomaly/_reference_original.py

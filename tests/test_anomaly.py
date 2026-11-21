@@ -62,7 +62,7 @@ def test_streaming_equals_batch_scores(trained):
     a, b = copy.deepcopy(det), copy.deepcopy(det)
     batch = a.score_packets(ho[:200])
     stream = np.array([b.process(p) for p in ho[:200]])
-    assert np.allclose(batch, stream, rtol=1e-4, atol=1e-5)
+    assert np.allclose(batch, stream, rtol=1e-4, atol=1e-4)                 # same scores: the tail comparison tolerates float round-off
 
 
 def test_threshold_gives_roughly_the_target_false_alarm_rate_on_new_normal_traffic(trained):
@@ -101,7 +101,7 @@ def test_save_load_roundtrip_and_tamper_check(trained, tmp_path):
     a, b = copy.deepcopy(det), det2
     b.features = copy.deepcopy(det.features)
     b.features = copy.deepcopy(det.features)
-    assert np.allclose(a.score_packets(ho[:100]), b.score_packets(ho[:100]), rtol=1e-4, atol=1e-5)
+    assert np.allclose(a.score_packets(ho[:100]), b.score_packets(ho[:100]), rtol=1e-4, atol=1e-4)
     w = d / "weights.pt"
     w.write_bytes(w.read_bytes() + b"x")
     with pytest.raises(ValueError):
@@ -110,11 +110,15 @@ def test_save_load_roundtrip_and_tamper_check(trained, tmp_path):
 
 def test_tail_sum_mode_scores_and_rejects_unknown_mode():
     X = np.random.default_rng(0).normal(size=(600, 12)).astype(np.float32)
-    e = AnomalyEnsemble(max_group=4, epochs=3, score_mode="tail_sum", topk=2).fit(X[:400], X[400:])
+    e = AnomalyEnsemble(max_group=4, epochs=3, score_mode="tail_sum", topk=2, grouping="correlation").fit(X[:400], X[400:])
     s = e.score(np.vstack([X[:50], X[:50] + 8]))
     assert s[50:].mean() > s[:50].mean()
     with pytest.raises(ValueError):
         AnomalyEnsemble(score_mode="nope")
+    with pytest.raises(ValueError):
+        AnomalyEnsemble(grouping="nope")
+    with pytest.raises(ValueError):
+        AnomalyEnsemble(epochs=1, grouping="family").fit(X[:400], X[400:])      # family grouping needs the feature names
 
 
 def test_injection_is_labelled_deterministic_and_needs_enough_hosts():

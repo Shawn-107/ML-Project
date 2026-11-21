@@ -1,0 +1,1168 @@
+{
+ "protocol": "Injection benchmark: our detector against our first version, on the same packets (an earlier run also compared a reference tool; its numbers are kept in benchmark_test.json).\n\n   python -m layered_nids.anomaly.benchmark --stage validate     # choose between our own variants (validation injections)\n   python -m layered_nids.anomaly.benchmark --stage test         # final numbers (different injections, 3 model seeds)\n\nData: the first 52 minutes of the Mirai capture (the paper's clean period), split in time order 60/20/20:\ntrain / calibration (threshold, tail) / hold. Synthetic attacks (see inject.py) are merged into the HOLD part only.\nEvery model is trained on the same clean train part, calibrated to the same 1% false-alarm rate on the same calibration part,\nand scored on the same attacked hold stream. Reported per attack kind (mean +- std over model seeds x injection seeds); false-alarm rate is also given for packets of hosts not involved in any attack (an attack changes the\nstatistics of its own host and target, so their normal packets can look odd for a good reason):\n  packet recall at the 1% policy, packet AUC (attack packets vs normal hold packets), and episode detection: does the attacker\n  host get a 60 s window whose flagged-packet count has probability <= 1e-6 under the normal false-alarm rate.\n",
+ "stage": "validate",
+ "fpr": 0.01,
+ "alert_p": 1e-06,
+ "window_s": 60.0,
+ "inj_seeds": [
+  100,
+  101
+ ],
+ "results": {
+  "nids_v2_family_tail_top5": {
+   "summary": {
+    "false_alarm_rate_on_normal": {
+     "mean": 0.041417779339423755,
+     "std": 0.007681344588593933,
+     "n": 4
+    },
+    "false_alarm_rate_uninvolved": {
+     "mean": 0.009077911140375268,
+     "std": 0.0005138800708672031,
+     "n": 4
+    },
+    "false_alert_windows_per_hour": {
+     "mean": 27.29260965719142,
+     "std": 2.488009820915819,
+     "n": 4
+    },
+    "kinds": {
+     "hscan": {
+      "packet_recall": {
+       "mean": 0.995,
+       "std": 0.0016666666666667052,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9961867045365815,
+       "std": 0.00022748264565016936,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "vscan": {
+      "packet_recall": {
+       "mean": 0.997,
+       "std": 0.0030000000000000027,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9962486091590537,
+       "std": 0.0016434019117302346,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "syn_flood": {
+      "packet_recall": {
+       "mean": 0.9995,
+       "std": 0.000552770798392556,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9830238883032716,
+       "std": 0.0004256290333622457,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "udp_flood": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.999073416881393,
+       "std": 3.545476469840978e-05,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "dns_burst": {
+      "packet_recall": {
+       "mean": 0.6489583333333333,
+       "std": 0.35046317319211856,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9670020545404856,
+       "std": 0.004804809555674404,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "exfil": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9935410505485281,
+       "std": 0.0005749108421386952,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "beacon": {
+      "packet_recall": {
+       "mean": 0.008928571428571428,
+       "std": 0.015464739353293545,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.05357142857142856,
+       "std": 0.017857142857142856,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.7413872435833083,
+       "std": 0.07529585529349725,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 0.0,
+       "std": 0.0,
+       "n": 4
+      }
+     }
+    }
+   },
+   "runs": [
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.03665963925977981,
+     "false_alarm_rate_uninvolved": 0.008564031069508066,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 0.9966666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9963728820176465,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 0.994,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9947819161396112,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.982479679081752,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9990427110174124,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.25416666666666665,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9616496349652535,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9931245851877879,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.07142857142857142,
+       "packet_auc": 0.8145914901448985,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.008564031069508066,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.05012883579292574,
+     "false_alarm_rate_uninvolved": 0.009591791211242472,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 0.9966666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9961647926914968,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9975181541344577,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9830872764894197,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9991180604356992,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.9958333333333333,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9718244905130006,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9930184176622159,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.0,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.6852725629956832,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.009591791211242472,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.03138908409463575,
+     "false_alarm_rate_uninvolved": 0.008564031069508066,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 0.9933333333333333,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9963859608026862,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 0.994,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9944735886624503,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 0.9986666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9836572772702428,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9990348637463886,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.3458333333333333,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9627781681892714,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9935444727492777,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.0,
+       "recall_at_1pct_fa": 0.07142857142857142,
+       "packet_auc": 0.8165804972726969,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.008564031069508066,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.04749355821035371,
+     "false_alarm_rate_uninvolved": 0.009591791211242472,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 0.9933333333333333,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9958231826344968,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9982207776996955,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 0.9993333333333333,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9828713203716718,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9990980323260716,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9717559244944171,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.994476726594831,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.0,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.6491044239199545,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.009591791211242472,
+     "false_alert_windows": 4,
+     "hours": 0.17403978804747264
+    }
+   ]
+  },
+  "nids_v2_family_tail_top8": {
+   "summary": {
+    "false_alarm_rate_on_normal": {
+     "mean": 0.04356992269852424,
+     "std": 0.00991778716535502,
+     "n": 4
+    },
+    "false_alarm_rate_uninvolved": {
+     "mean": 0.0091834682466587,
+     "std": 0.0005304975643142173,
+     "n": 4
+    },
+    "false_alert_windows_per_hour": {
+     "mean": 30.16551593689578,
+     "std": 6.26135407374735,
+     "n": 4
+    },
+    "kinds": {
+     "hscan": {
+      "packet_recall": {
+       "mean": 0.9991666666666666,
+       "std": 0.0014433756729740495,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9944390274849693,
+       "std": 0.0003195817183260201,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "vscan": {
+      "packet_recall": {
+       "mean": 0.99975,
+       "std": 0.0004330127018922198,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9982447440852659,
+       "std": 0.0003737558093877158,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "syn_flood": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9936485808542204,
+       "std": 0.00048030528232853006,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "udp_flood": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9997397760990084,
+       "std": 1.936767328638747e-05,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "dns_burst": {
+      "packet_recall": {
+       "mean": 0.9895833333333334,
+       "std": 0.0136613302589625,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.980283152035996,
+       "std": 0.004285838509630901,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "exfil": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.998685734608027,
+       "std": 7.35004102596756e-05,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "beacon": {
+      "packet_recall": {
+       "mean": 0.03571428571428571,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.03571428571428571,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.749418042867182,
+       "std": 0.07659406212748038,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 0.0,
+       "std": 0.0,
+       "n": 4
+      }
+     }
+    }
+   },
+   "runs": [
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.035488404778636684,
+     "false_alarm_rate_uninvolved": 0.008564031069508066,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9943177559147341,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 0.999,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9981020145233076,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9931016826735379,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9997569883657376,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.9916666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9755048508628095,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9987545629343328,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.824919268480407,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.008564031069508066,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.054520965097212465,
+     "false_alarm_rate_uninvolved": 0.009591791211242472,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 0.9966666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9941022487702039,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.998597329585383,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9939249043491841,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9997368236120872,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9847217342078551,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9985820742562662,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.68976717531707,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.009591791211242472,
+     "false_alert_windows": 7,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.03203326305926447,
+     "false_alarm_rate_uninvolved": 0.00876319458275244,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9949642773483252,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9976970602014522,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9932785390801906,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9997560318575779,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.9666666666666667,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9765234588506285,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9987556853673774,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.8254044941940233,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.00876319458275244,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.05223705785898337,
+     "false_alarm_rate_uninvolved": 0.009814856123131831,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9943718279066136,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9985825720309207,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.994289197313969,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9997092605606309,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9843825642226907,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9986506158741313,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.6575812334772279,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.009814856123131831,
+     "false_alert_windows": 4,
+     "hours": 0.17403978804747264
+    }
+   ]
+  },
+  "nids_v2_family_tail_top12": {
+   "summary": {
+    "false_alarm_rate_on_normal": {
+     "mean": 0.04384809088779573,
+     "std": 0.01242725974815202,
+     "n": 4
+    },
+    "false_alarm_rate_uninvolved": {
+     "mean": 0.016678022792782472,
+     "std": 0.0014174397572651657,
+     "n": 4
+    },
+    "false_alert_windows_per_hour": {
+     "mean": 31.601969076747963,
+     "std": 2.8729062797043596,
+     "n": 4
+    },
+    "kinds": {
+     "hscan": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.9983333333333333,
+       "std": 0.0016666666666666496,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9949514425704693,
+       "std": 0.0002784869240517341,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "vscan": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.99825,
+       "std": 0.001785357107135714,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9995333801827126,
+       "std": 0.00026882187423378566,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "syn_flood": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9990499336300461,
+       "std": 0.00014984941725923603,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "udp_flood": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.9999838808854533,
+       "std": 4.451983115694897e-06,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "dns_burst": {
+      "packet_recall": {
+       "mean": 0.9968750000000001,
+       "std": 0.004294901693351715,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.9552083333333333,
+       "std": 0.06089074060698119,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.98510738756149,
+       "std": 0.003959159865596515,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "exfil": {
+      "packet_recall": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 1.0,
+       "std": 0.0,
+       "n": 4
+      }
+     },
+     "beacon": {
+      "packet_recall": {
+       "mean": 0.03571428571428571,
+       "std": 0.0,
+       "n": 4
+      },
+      "recall_at_1pct_fa": {
+       "mean": 0.017857142857142856,
+       "std": 0.017857142857142856,
+       "n": 4
+      },
+      "packet_auc": {
+       "mean": 0.7552899014489844,
+       "std": 0.08632057405538572,
+       "n": 4
+      },
+      "episode_detected": {
+       "mean": 0.0,
+       "std": 0.0,
+       "n": 4
+      }
+     }
+    }
+   },
+   "runs": [
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.030510658233778402,
+     "false_alarm_rate_uninvolved": 0.016729735112527386,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9947269071601468,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 0.996,
+       "packet_auc": 0.999356640899508,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9989521745920201,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9999877020379481,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.9979166666666667,
+       "recall_at_1pct_fa": 0.8520833333333333,
+       "packet_auc": 0.9798705053876787,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 1.0,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.8385453267744203,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.016729735112527386,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.05692199578355587,
+     "false_alarm_rate_uninvolved": 0.018737452598706225,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 0.9966666666666667,
+       "packet_auc": 0.9946648317326462,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9997761185289296,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9988608378230656,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9999785859295697,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9885675314281254,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 1.0,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.0,
+       "packet_auc": 0.681179516782117,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.018737452598706225,
+     "false_alert_windows": 6,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 100,
+     "false_alarm_rate_on_normal": 0.0323846334036074,
+     "false_alarm_rate_uninvolved": 0.014738099980083649,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9953603498086984,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 0.997,
+       "packet_auc": 0.9991867533380183,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.999152358085422,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9999888342312797,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 0.9895833333333334,
+       "recall_at_1pct_fa": 0.96875,
+       "packet_auc": 0.9827000126883736,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 1.0,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.03571428571428571,
+       "packet_auc": 0.8438284308804337,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.014738099980083649,
+     "false_alert_windows": 5,
+     "hours": 0.17403978804747264
+    },
+    {
+     "seed": 101,
+     "false_alarm_rate_on_normal": 0.05557507613024128,
+     "false_alarm_rate_uninvolved": 0.016506803479812624,
+     "kinds": {
+      "hscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 0.9966666666666667,
+       "packet_auc": 0.9950536815803858,
+       "episode_detected": true
+      },
+      "vscan": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9998140079643946,
+       "episode_detected": true
+      },
+      "syn_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9992343640196767,
+       "episode_detected": true
+      },
+      "udp_flood": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9999804013430156,
+       "episode_detected": true
+      },
+      "dns_burst": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 0.9892915007417818,
+       "episode_detected": true
+      },
+      "exfil": {
+       "packet_recall": 1.0,
+       "recall_at_1pct_fa": 1.0,
+       "packet_auc": 1.0,
+       "episode_detected": true
+      },
+      "beacon": {
+       "packet_recall": 0.03571428571428571,
+       "recall_at_1pct_fa": 0.0,
+       "packet_auc": 0.6576063313589666,
+       "episode_detected": false
+      }
+     },
+     "false_alarm_rate_uninvolved_at_policy": 0.016506803479812624,
+     "false_alert_windows": 6,
+     "hours": 0.17403978804747264
+    }
+   ]
+  }
+ }
+}
