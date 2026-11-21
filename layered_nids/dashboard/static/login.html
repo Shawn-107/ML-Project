@@ -1,15 +1,27 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NIDS - sign in</title><link rel="stylesheet" href="/static/style.css"></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIDS - sign in</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.500-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
-<form class="login" id="f" autocomplete="on">
-  <h1>NIDS</h1>
-  <div class="note" style="margin-bottom:14px">Network intrusion detection. Sign in to continue.</div>
-  <label>User<input id="u" autocomplete="username" required></label>
-  <label>Password<input id="p" type="password" autocomplete="current-password" required></label>
-  <button class="primary" style="width:100%">Sign in</button>
-  <div class="err" id="e"></div>
-</form>
+<div class="login-page">
+  <form class="login" id="f" autocomplete="on">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
+      <div>NIDS<small>layered network intrusion detection</small></div>
+    </div>
+    <label for="u">User</label>
+    <input id="u" autocomplete="username" required autofocus>
+    <label for="p">Password</label>
+    <input id="p" type="password" autocomplete="current-password" required>
+    <button class="btn" type="submit">Sign in</button>
+    <div class="err" id="e" role="alert"></div>
+  </form>
+</div>
 <script src="/static/login.js"></script>
 </body>
 </html>

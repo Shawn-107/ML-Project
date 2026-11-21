@@ -76,6 +76,45 @@ def _filter(rows, q: dict, host_key="host", text_keys=("host", "reason")):
     return out
 
 
+def _stats(alerts: list, events: list, bins: int = 48) -> dict:
+    """Numbers for the overview charts: alerts over time by severity, busiest hosts, evidence share per layer, events per rule."""
+    ts = [float(r.get("ts", 0)) for r in alerts] + [float(r.get("ts", 0)) for r in events]
+    t0, t1 = (min(ts), max(ts)) if ts else (0.0, 0.0)
+    width = max((t1 - t0) / bins, 1.0)
+    hist = [{"t0": t0 + i * width, "t1": t0 + (i + 1) * width, "critical": 0, "high": 0, "medium": 0, "low": 0, "events": 0} for i in range(bins)]
+    for r in alerts:
+        i = min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)
+        hist[i][r.get("severity", "low") if r.get("severity") in SEVERITY_ORDER else "low"] += 1
+    for r in events:
+        hist[min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)]["events"] += 1
+    hosts: dict = {}
+    for r in alerts:
+        h = hosts.setdefault(r.get("host", "?"), {"host": r.get("host", "?"), "alerts": 0, "events": 0, "max_severity": "low", "last": 0.0})
+        h["alerts"] += 1
+        h["last"] = max(h["last"], float(r.get("ts", 0)))
+        if SEVERITY_ORDER.get(r.get("severity", "low"), 0) > SEVERITY_ORDER.get(h["max_severity"], 0):
+            h["max_severity"] = r.get("severity", "low")
+    for r in events:
+        h = hosts.setdefault(r.get("host", "?"), {"host": r.get("host", "?"), "alerts": 0, "events": 0, "max_severity": "none", "last": 0.0})
+        h["events"] += 1
+        h["last"] = max(h["last"], float(r.get("ts", 0)))
+    top = sorted(hosts.values(), key=lambda h: (-h["alerts"], -h["events"], h["host"]))[:8]
+    layers: dict = {}
+    for r in alerts:
+        for k, v in (r.get("layers") or {}).items():
+            layers[k] = layers.get(k, 0.0) + float(v)
+    total = sum(layers.values()) or 1.0
+    rules: dict = {}
+    for r in events:
+        d = r.get("detail") or {}
+        k = str(d.get("trail", r.get("layer", "?")))
+        x = rules.setdefault(k, {"rule": k, "count": 0, "signature": bool(d.get("signature"))})
+        x["count"] += 1
+    return {"t0": t0, "t1": t1, "hist": hist, "top_hosts": top, "layers": {k: v / total for k, v in sorted(layers.items(), key=lambda kv: -kv[1])},
+            "rules": sorted(rules.values(), key=lambda x: -x["count"])[:8],
+            "severity": {k: sum(1 for r in alerts if r.get("severity") == k) for k in ("critical", "high", "medium", "low")}}
+
+
 def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -187,6 +226,13 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
                     sev[r.get("severity", "low")] = sev.get(r.get("severity", "low"), 0) + 1
                 return self._json(200, {"alerts": len(a), "alert_hosts": len({r.get("host") for r in a}), "severity": sev, "events": len(e),
                                         "signature_events": sum(1 for r in e if (r.get("detail") or {}).get("signature")), "event_hosts": len({r.get("host") for r in e})})
+            if name == "stats" and method == "GET":
+                return self._json(200, _stats(data.alerts(), data.events()))
+            if name == "host" and method == "GET":
+                h = q.get("host", [""])[0]
+                a = sorted((r for r in data.alerts() if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
+                e = sorted((r for r in data.events() if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
+                return self._json(200, {"host": h, "alerts": a[-200:], "events": e[-200:], "alert_total": len(a), "event_total": len(e)})
             if name == "alerts" and method == "GET":
                 rows = _filter(data.alerts(), q)
                 sev = q.get("severity", [""])[0]

@@ -129,14 +129,29 @@ def test_upload_checks_and_download_safety(srv):
         assert call(base, "/nids/api/download?" + q, opener=op)[0] == 404
 
 
+def test_csv_upload_result_file_validation():
+    assert csv_upload.result_file(csv_upload.PROJECT, "../../x", "scored") is None
+    assert csv_upload.result_file(csv_upload.PROJECT, "0" * 32, "../x") is None
+
+
+def test_stats_and_host_endpoints(srv):
+    base = srv[0]
+    op = signed_in(srv)
+    get = lambda p: json.loads(call(base, p, opener=op)[1])
+    st = get("/nids/api/stats")
+    assert st["severity"] == {"critical": 1, "high": 0, "medium": 1, "low": 0} and len(st["hist"]) == 48
+    assert sum(b["critical"] + b["medium"] for b in st["hist"]) == 2 and sum(b["events"] for b in st["hist"]) == 2
+    assert {h["host"] for h in st["top_hosts"]} == {"192.168.2.5", "192.168.2.6"} and abs(sum(st["layers"].values()) - 1.0) < 1e-9
+    assert {r["rule"] for r in st["rules"]} == {"directory traversal", "arp_flood"}
+    host = get("/nids/api/host?host=192.168.2.5")
+    assert host["alert_total"] == 1 and host["event_total"] == 1 and host["alerts"][0]["severity"] == "critical"
+    assert get("/nids/api/host?host=10.9.9.9")["alert_total"] == 0
+    assert call(base, "/nids/api/stats")[0] == 401                          # needs a session
+
+
 def test_lockout_after_repeated_failures(srv):
     base, pw, _ = srv
     J = {"Content-Type": "application/json"}
     for _ in range(6):
         call(base, "/login", json.dumps({"user": "tester", "password": "bad"}).encode(), J)
     assert call(base, "/login", json.dumps({"user": "tester", "password": pw}).encode(), J)[0] == 401              # locked for a minute
-
-
-def test_csv_upload_result_file_validation():
-    assert csv_upload.result_file(csv_upload.PROJECT, "../../x", "scored") is None
-    assert csv_upload.result_file(csv_upload.PROJECT, "0" * 32, "../x") is None

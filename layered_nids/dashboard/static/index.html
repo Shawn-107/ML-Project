@@ -1,46 +1,89 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NIDS</title><link rel="stylesheet" href="/static/style.css"></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIDS</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.500-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
 <header>
-  <span class="brand">NIDS<small>layered network intrusion detection</small></span>
-  <nav><a href="/" class="on">Overview</a><a href="/app/">Flow analysis</a></nav>
-  <span class="spacer"></span>
-  <nav><button id="theme" title="light / dark">Theme</button><button id="out">Sign out</button></nav>
-</header>
-<main>
-  <div class="cards" id="cards"></div>
-  <div class="panel">
-    <div class="tabs">
-      <button data-t="alerts" class="on">Host alerts</button>
-      <button data-t="events">Rule events</button>
-      <button data-t="upload">Upload CSV</button>
-    </div>
-    <section id="t-alerts">
-      <div class="tools">
-        <input id="aq" placeholder="search host or reason">
-        <select id="asev"><option value="">any severity</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select>
-        <span class="note" id="acount"></span>
-      </div>
-      <div class="scroll"><table id="atab"></table></div>
-    </section>
-    <section id="t-events" hidden>
-      <div class="tools">
-        <input id="eq" placeholder="search host or reason">
-        <select id="ekind"><option value="">signatures and heuristics</option><option value="signature">signatures only</option><option value="heuristic">heuristics only</option></select>
-        <span class="note" id="ecount"></span>
-      </div>
-      <div class="scroll"><table id="etab"></table></div>
-    </section>
-    <section id="t-upload" hidden class="pad">
-      <div class="note" style="margin:0 0 10px">Analyse a flow file: UNSW-NB15 (34 columns), NetFlow v2 (40 columns) or Argus. The format is detected from the columns. Up to 100 MB. The file is deleted after analysis.</div>
-      <input type="file" id="file" accept=".csv,.tsv,.txt,.binetflow">
-      <select id="policy"><option value="fpr_3pct">3% false-alarm target</option><option value="fpr_1pct">1% false-alarm target (stricter)</option></select>
-      <button class="primary" id="go">Analyse</button>
-      <div id="result" style="margin-top:14px"></div>
-    </section>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
+    <div>NIDS<small>layered network intrusion detection</small></div>
   </div>
+  <nav class="tabs" aria-label="sections">
+    <a href="#/overview" data-v="overview" class="on">Overview</a>
+    <a href="#/alerts" data-v="alerts">Alerts</a>
+    <a href="#/events" data-v="events">Events</a>
+    <a href="#/upload" data-v="upload">Upload</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="chip-status" id="status"><span class="dot"></span><span id="status-t">loading</span></span>
+  <a class="hbtn hide-s" href="/app/">Flow analysis &#8599;</a>
+  <button class="hbtn" id="theme" title="Switch light or dark">Theme</button>
+  <button class="hbtn" id="out">Sign out</button>
+</header>
+
+<main>
+  <section class="view" id="v-overview">
+    <h1>Overview</h1>
+    <p class="sub" id="range">What the detectors found in the loaded data.</p>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid">
+      <div class="card span-8"><div class="card-h"><h2>Alerts over time</h2><span class="hint">UTC, by severity</span></div><div id="ch-time"></div><div class="legend" id="lg-time"></div></div>
+      <div class="card span-4"><div class="card-h"><h2>Severity</h2></div><div id="ch-sev" class="donut-wrap"></div></div>
+      <div class="card span-6"><div class="card-h"><h2>Busiest hosts</h2><span class="hint">click a host for its timeline</span></div><div id="ch-hosts" class="bars"></div></div>
+      <div class="card span-6"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of all alert weight</span></div><div id="ch-layers" class="bars"></div><div class="card-h" style="margin-top:20px"><h2>Rule events by rule</h2></div><div id="ch-rules" class="bars"></div></div>
+      <div class="card span-12" style="padding:0"><div class="card-h" style="padding:16px 18px 0"><h2>Latest alerts</h2><a href="#/alerts">View all</a></div><div class="table-wrap" style="max-height:none"><table id="t-latest"></table></div></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-alerts" hidden>
+    <h1>Alerts</h1><p class="sub">One line per host and time window where the evidence added up. Click a row for the host's timeline.</p>
+    <div class="card" style="padding:0">
+      <div class="toolbar">
+        <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="aq" placeholder="Search host or reason" aria-label="search alerts"></div>
+        <div class="seg" id="asev" role="group" aria-label="severity"><button data-s="" class="on">All</button><button data-s="critical">Critical</button><button data-s="high">High</button><button data-s="medium">Medium</button><button data-s="low">Low</button></div>
+        <span class="count" id="acount"></span>
+      </div>
+      <div class="table-wrap"><table id="atab"></table></div>
+      <button class="loadmore" id="amore" hidden>Show more</button>
+    </div>
+  </section>
+
+  <section class="view" id="v-events" hidden>
+    <h1>Rule events</h1><p class="sub">What the signature and heuristic rules saw. Signatures are known-bad patterns; heuristics are behaviour rules and can fire on odd but harmless traffic.</p>
+    <div class="card" style="padding:0">
+      <div class="toolbar">
+        <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="eq" placeholder="Search host, rule or reason" aria-label="search events"></div>
+        <div class="seg" id="ekind" role="group" aria-label="type"><button data-k="" class="on">All</button><button data-k="signature">Signatures</button><button data-k="heuristic">Heuristics</button></div>
+        <span class="count" id="ecount"></span>
+      </div>
+      <div class="table-wrap"><table id="etab"></table></div>
+      <button class="loadmore" id="emore" hidden>Show more</button>
+    </div>
+  </section>
+
+  <section class="view" id="v-upload" hidden>
+    <h1>Upload a flow file</h1><p class="sub">UNSW-NB15 (34 columns), NetFlow v2 (40 columns) or Argus flow files. The format is detected from the columns. Up to 100 MB; the file is deleted after analysis.</p>
+    <div class="card">
+      <label class="drop" id="drop"><input type="file" id="file" accept=".csv,.tsv,.txt,.binetflow"><b id="drop-t">Drop a file here or click to choose</b><span id="drop-s">.csv, .tsv, .binetflow</span></label>
+      <div class="upload-row">
+        <div class="seg" id="policy" role="group" aria-label="false-alarm target"><button data-p="fpr_3pct" class="on">3% false-alarm target</button><button data-p="fpr_1pct">1% (stricter)</button></div>
+        <button class="btn" id="go">Analyse</button>
+      </div>
+      <div id="result"></div>
+    </div>
+  </section>
 </main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="host details" aria-hidden="true">
+  <div class="drawer-h"><h2 id="d-title"></h2><span id="d-sev"></span><button class="xbtn" id="d-close" aria-label="close">&times;</button></div>
+  <div class="drawer-b" id="d-body"></div>
+</aside>
 <script src="/static/app.js"></script>
 </body>
 </html>
