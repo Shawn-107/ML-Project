@@ -1,6 +1,6 @@
 """The two ML models behind CSV mode, trained once, saved with a checksum, and scored in a way that tolerates bad input.
 
-  unsw34      gradient boosting on the earlier project's 34 UNSW-NB15 features and its fitted preprocessor (cleaned official train split)
+  unsw34      the earlier project's flow model: gradient boosting on 11 UNSW-NB15 inputs (layered_nids/flowmodel), cluster-grouped validation
   netflow_v2  gradient boosting on the 40 NetFlow v2 features (NF-ToN-IoT-v2, split by source host)
 
 Both use thresholds named by false-alarm target on VALIDATION benign flows (1% and 3%), like the rest of the project.
@@ -70,15 +70,18 @@ def to_numeric_frame(df: pd.DataFrame, cols) -> tuple[pd.DataFrame, np.ndarray]:
 
 # ---------------------------------------------------------------------------------------------- scoring
 def score_unsw(df: pd.DataFrame, m: dict) -> tuple[np.ndarray, dict]:
-    num, bad = to_numeric_frame(df, m["continuous"] + m["binary"])
+    """UNSW-NB15 flow records: the flow model of the owner's earlier project (11 inputs; see layered_nids/flowmodel)."""
+    from layered_nids.flowmodel.contract import CATEGORICAL, FEATURES, NUMERIC
+    from layered_nids.flowmodel.models import p1
+    b = m["bundle"]
+    num, bad = to_numeric_frame(df, NUMERIC)
     frame = pd.DataFrame(index=df.index)
-    for c in m["categorical"]:
-        frame[c] = df[c].str.lower().replace("", "-")
-    for c in m["continuous"] + m["binary"]:
-        frame[c] = num[c]
-    X = np.asarray(m["pre"].transform(frame[m["features"]]), dtype=np.float32)
-    p = m["gb"].predict_proba(X)[:, 1]
-    return p, {"bad_cells": bad, "missing": num.isna().sum(axis=1).to_numpy(), "out_of_range": m["ranges"].count(num[m["continuous"]])}
+    for c in CATEGORICAL:
+        frame[c] = df[c].astype(str).str.strip().str.lower().replace("", "-")
+    for c in NUMERIC:
+        frame[c] = num[c].clip(lower=0)                              # unreadable stays NaN (gradient boosting handles it); counters are never negative
+    p = p1(b.model, b.prep.transform(frame[FEATURES]))
+    return p, {"bad_cells": bad, "missing": num.isna().sum(axis=1).to_numpy(), "out_of_range": m["ranges"].count(num)}
 
 
 def score_netflow(df: pd.DataFrame, m: dict) -> tuple[np.ndarray, dict]:
@@ -126,22 +129,23 @@ def _thresholds(val_benign_scores) -> dict:
 
 
 def train_unsw(seed: int = 0) -> tuple[dict, dict]:
-    from nids.config import BINARY, CATEGORICAL, CONTINUOUS, FEATURES
-    from layered_nids.flows.data import load_flow_data
-    from layered_nids.flows.evaluate import evaluate_scores
-    from layered_nids.flows.models import HGB
-    d = load_flow_data()
-    gb = HGB(seed, max_iter=400).fit(d.Xtr, d.ytr)
-    sv, st = gb.score(d.Xv), gb.score(d.Xte)
-    thr = _thresholds(sv[d.yv == 0])
-    rc = RangeCheck.fit(d.raw("tr")[CONTINUOUS].astype(float))
-    metrics = evaluate_scores(sv, d.yv, st, d.yte, d.cte)           # thresholds from the full validation set; test scored once
-    model = {"kind": "unsw34", "pre": d.bundle.preprocessor, "gb": gb.m, "thresholds": thr, "ranges": rc, "features": list(FEATURES),
-             "categorical": list(CATEGORICAL), "continuous": list(CONTINUOUS), "binary": list(BINARY)}
-    meta = {"trained_on": {"rows": int(len(d.ytr)), "source": "UNSW-NB15 official training split, cleaned (legacy nids.data)"},
-            "thresholds": thr, "official_test_cleaned": {k: metrics[k] for k in ("auc_test", "fpr_1pct", "fpr_3pct") if k in metrics}}
-    for k in ("fpr_1pct", "fpr_3pct"):
-        meta["official_test_cleaned"][k] = {x: y for x, y in metrics[k].items() if x != "flagged_by_family"}
+    """The earlier project's model, retrained here: gradient boosting on 11 inputs, thresholds on a validation split of whole clusters."""
+    from sklearn.metrics import roc_auc_score
+    from layered_nids.flowmodel.contract import FEATURES, NUMERIC
+    from layered_nids.flowmodel.fit import load_frames
+    from layered_nids.flowmodel.models import p1
+    from layered_nids.flowmodel.train import train
+    tr, va, te = load_frames()
+    bundle = train(tr, va, seed=seed)
+    thr = {k: bundle.thresholds[k] for k in POLICIES}
+    p, y = p1(bundle.model, bundle.prep.transform(te[FEATURES])), te["y"].to_numpy()
+    test = {"auc": float(roc_auc_score(y, p))}
+    for k in POLICIES:
+        f = p >= thr[k]
+        test[k] = {"accuracy": float((f == (y == 1)).mean()), "recall": float(f[y == 1].mean()), "false_alarm": float(f[y == 0].mean())}
+    model = {"kind": "unsw34", "bundle": bundle, "thresholds": thr, "ranges": RangeCheck.fit(tr[NUMERIC].astype(float)), "features": list(NUMERIC)}
+    meta = {"trained_on": {"rows": int(len(tr)), "source": "UNSW-NB15 official training split, cleaned (legacy nids.data), cluster-grouped validation"},
+            "thresholds": thr, "official_test_cleaned": test}
     return model, meta
 
 

@@ -1,0 +1,46 @@
+{
+ "unsw_official_test_cleaned": {
+  "fpr_3pct": {
+   "rows": 46830,
+   "attack_share": 0.3382,
+   "accuracy": 0.8921,
+   "recall": 0.7755,
+   "false_alarm": 0.0483,
+   "seconds": 1.5,
+   "warnings": 0,
+   "schema": "unsw34"
+  },
+  "fpr_1pct": {
+   "rows": 46830,
+   "attack_share": 0.3382,
+   "accuracy": 0.8634,
+   "recall": 0.6082,
+   "false_alarm": 0.0063,
+   "seconds": 1.5,
+   "warnings": 0,
+   "schema": "unsw34"
+  }
+ },
+ "unsw_official_test_raw_file": {
+  "fpr_3pct": {
+   "rows": 82332,
+   "attack_share": 0.5506,
+   "accuracy": 0.9088,
+   "recall": 0.9046,
+   "false_alarm": 0.086,
+   "seconds": 2.4,
+   "warnings": 0,
+   "schema": "unsw34"
+  },
+  "fpr_1pct": {
+   "rows": 82332,
+   "attack_share": 0.5506,
+   "accuracy": 0.8814,
+   "recall": 0.7895,
+   "false_alarm": 0.0059,
+   "seconds": 2.3,
+   "warnings": 0,
+   "schema": "unsw34"
+  }
+ }
+}

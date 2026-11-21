@@ -33,14 +33,13 @@ def unsw_frame(n, seed=0):
 
 
 def toy_unsw():
-    df, y = unsw_frame(600)
-    pre = build_preprocessor()
-    X = np.asarray(pre.fit_transform(df), dtype=np.float32)
-    gb = HistGradientBoostingClassifier(max_iter=40, random_state=0).fit(X, y)
-    s = gb.predict_proba(X)[:, 1]
-    thr = {"fpr_1pct": float(np.quantile(s[y == 0], 0.99)), "fpr_3pct": float(np.quantile(s[y == 0], 0.97))}
-    return {"kind": "unsw34", "pre": pre, "gb": gb, "thresholds": thr, "ranges": M.RangeCheck.fit(df[CONTINUOUS].astype(float)),
-            "features": list(FEATURES), "categorical": list(CATEGORICAL), "continuous": list(CONTINUOUS), "binary": list(BINARY)}
+    from layered_nids.flowmodel.contract import NUMERIC
+    from layered_nids.flowmodel.train import train
+    df, y = unsw_frame(900)
+    df = df.assign(y=y)
+    bundle = train(df.iloc[:600].reset_index(drop=True), df.iloc[600:].reset_index(drop=True), fast=True)
+    thr = {k: bundle.thresholds[k] for k in ("fpr_1pct", "fpr_3pct")}
+    return {"kind": "unsw34", "bundle": bundle, "thresholds": thr, "ranges": M.RangeCheck.fit(df[NUMERIC].astype(float)), "features": list(NUMERIC)}
 
 
 def toy_netflow():
@@ -107,9 +106,9 @@ def unsw_csv(path, n=8, sep=",", bom=False, break_rows=True):
     df = df.astype(str).copy()
     if break_rows:
         df.loc[1, "sbytes"] = "abc"                       # text where a number belongs
-        df.loc[2, "dur"] = ""                             # empty
+        df.loc[2, "ackdat"] = ""                             # empty
         df.loc[3, "dbytes"] = "inf"                       # infinite
-        df.loc[4, CONTINUOUS] = ""                        # a row that is essentially empty
+        df.loc[4, ["dbytes", "smean", "dload", "ackdat", "ct_src_dport_ltm", "sbytes", "dmean", "spkts"]] = ""                        # a row that is essentially empty
     text = df.to_csv(sep=sep, index=False)
     return write(path, ("﻿" if bom else "") + text)
 

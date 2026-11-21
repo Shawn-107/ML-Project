@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "model": "gradient boosting (HistGradientBoosting)",
+  "trained_at_utc": "2026-11-21T00:55:19+00:00",
+  "python": "3.13.17",
+  "sklearn": "1.6.1",
+  "numpy": "2.2.6",
+  "pandas": "2.2.3",
+  "features": [
+    "proto",
+    "service",
+    "state",
+    "dbytes",
+    "smean",
+    "dload",
+    "ackdat",
+    "ct_src_dport_ltm",
+    "sbytes",
+    "dmean",
+    "spkts"
+  ],
+  "default_policy": "fpr_3pct",
+  "n_train": 71991,
+  "n_val": 19848,
+  "fast": false,
+  "noise_augmentation": null,
+  "volume_augmentation": null,
+  "n_trees": 300,
+  "kmeans_k": 12,
+  "kmeans_silhouette": {
+    "4": 0.35986918210983276,
+    "8": 0.4190278649330139,
+    "12": 0.5127583146095276
+  },
+  "val_auc": 0.9760503353262863,
+  "train_auc": 0.982094719445638,
+  "sha256": "2a0a0acbdddc9b08673d8f0dae7331ad277475ca8097342e631538c627f504de",
+  "thresholds": {
+    "fpr_1pct": 0.9527616582665809,
+    "fpr_3pct": 0.8183041374728903,
+    "fpr_5pct": 0.764534505090468
+  },
+  "novelty_threshold": 2.8529911041259766
+}

@@ -1,35 +1,29 @@
 {
   "trained_on": {
-    "rows": 73471,
-    "source": "UNSW-NB15 official training split, cleaned (legacy nids.data)"
+    "rows": 71991,
+    "source": "UNSW-NB15 official training split, cleaned (legacy nids.data), cluster-grouped validation"
   },
   "thresholds": {
-    "fpr_1pct": 0.8980083177936269,
-    "fpr_3pct": 0.771312900459454
+    "fpr_1pct": 0.9527616582665809,
+    "fpr_3pct": 0.8183041374728903
   },
   "official_test_cleaned": {
-    "auc_test": 0.9572853592583971,
+    "auc": 0.9539943691568002,
     "fpr_1pct": {
-      "threshold": 0.8980083177936269,
-      "accuracy": 0.8897074524877215,
-      "recall": 0.7201944935589796,
-      "false_alarm_rate": 0.02368200296831645,
-      "balanced_accuracy": 0.8482562452953316,
-      "precision": 0.9395337342449954
+      "accuracy": 0.8633568225496476,
+      "recall": 0.608234402626926,
+      "false_alarm": 0.006291540298122217
     },
     "fpr_3pct": {
-      "threshold": 0.771312900459454,
-      "accuracy": 0.8907751441383729,
-      "recall": 0.8141576155594847,
-      "false_alarm_rate": 0.07007807962831515,
-      "balanced_accuracy": 0.8720397679655848,
-      "precision": 0.8558247593760372
+      "accuracy": 0.8921417894512065,
+      "recall": 0.7755114928012125,
+      "false_alarm": 0.048267406594824806
     }
   },
   "kind": "unsw34",
-  "sha256": "dae9e7c5b5b74f50835e70ae2c32dbd9e2836745a7725cc0e680a7dc49a14eca",
+  "sha256": "9343b019c753275677d51049be92cff86cdb8de22673d3e01a8c470c2c582ef4",
   "sklearn": "1.6.1",
   "numpy": "2.2.6",
   "pandas": "2.2.3",
-  "trained_at": "2026-11-20T19:39:17"
+  "trained_at": "2026-11-21T06:25:46"
 }
