@@ -1300,7 +1300,7 @@
     }
    ]
   },
-  "kitsune_original": {
+  "reference_detector": {
    "summary": {
     "false_alarm_rate_on_normal": {
      "mean": 0.1436909502615757,

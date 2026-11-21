@@ -191,7 +191,7 @@ def main(argv=None):
         for ms in mseeds:
             if name in VARIANTS:
                 m = Own(name, ms, **VARIANTS[name])
-            elif name == "kitsune_original":                 # comparison only: needs a LOCAL file that is never committed
+            elif name == "reference_detector":                 # comparison only: needs a LOCAL file that is never committed
                 try:
                     from layered_nids.anomaly._reference_original import Original
                 except ImportError:
