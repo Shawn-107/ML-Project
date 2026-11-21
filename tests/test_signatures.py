@@ -123,3 +123,31 @@ def test_indicator_file_kinds_matching_and_suspicious_policy(tmp_path):
     assert "evilbot" in [e for e in ev if e.detail["trail"] == "198.18.5.5"][0].reason          # description looked up from the file
     assert not scan([pkt(1.0, dst="93.184.216.34", proto="udp", dport=53, qname="www.example.org")], trails=tr)     # ordinary traffic: nothing
     assert not tr.match(pkt(1.0, dst="8.8.8.8", proto="udp", dport=53, qname="notbad.example"))                     # not a sub-domain
+
+
+def test_external_sensor_log_parsing_and_evidence(monkeypatch):
+    from layered_nids.signatures import external as X
+    text = ('"2018-10-25 05:48:11.704154" s1 192.168.2.112 59290 61.188.37.216 8000 TCP IPORT 61.188.37.216:8000 "potential periodic beaconing (suspicious)" (heuristic)\n'
+            '"2018-10-25 05:50:00.000000" s1 10.0.0.66 40000 66.66.66.66 80 TCP IP 66.66.66.66 "malware (test)" (static)\n'
+            '"2018-10-25 05:50:01.000000" s1 8.8.8.8 53 1.1.1.1 4444 UDP IP 8.8.8.8 "x (test)" (static)\n'          # no internal host
+            'this line is not an event\n\n')
+    ev, bad = X.parse_events(text)
+    assert len(ev) == 3 and bad == 1
+    out = X.to_evidence(ev)
+    assert [e.host for e in out] == ["192.168.2.112", "10.0.0.66"]                               # the external-only event is skipped
+    assert out[0].detail["signature"] is False and out[0].score == X.BEHAVIOUR_SCORE and "beaconing" in out[0].reason
+    assert out[1].detail["signature"] is True and out[1].score == X.INDICATOR_SCORE and out[1].detail["trail"] == "66.66.66.66"
+    assert out[0].ts == 1540446491.704154
+    monkeypatch.delenv("NIDS_SENSOR_WSL_ROOT", raising=False)
+    monkeypatch.delenv("NIDS_SENSOR_SHARE", raising=False)
+    assert not X.configured()
+    with pytest.raises(RuntimeError):
+        X.run_external_sensor("x.pcap")
+
+
+def test_icmp_sweep_is_flagged_but_ordinary_pings_are_not():
+    sweep = [pkt(i * 0.1, dst=f"192.168.1.{i + 10}", proto="icmp", sport=0, dport=0, size=42) for i in range(20)]
+    ev = scan(sweep)
+    assert "icmp_sweep" in {e.detail["trail"] for e in ev} and all(e.detail["signature"] is False for e in ev)
+    few = [pkt(i * 5.0, dst="192.168.1.1", proto="icmp", sport=0, dport=0, size=42) for i in range(20)]       # 20 pings to ONE host: not a sweep
+    assert "icmp_sweep" not in {e.detail["trail"] for e in scan(few)}

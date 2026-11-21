@@ -5,6 +5,7 @@ the transparent baseline the ML layers are compared with.
   syn_flood     one host sends very many TCP SYN-without-ACK packets to ONE destination
   udp_flood     one host sends very many UDP packets to ONE destination
   arp_flood     one host sends very many ARP packets
+  icmp_sweep    one host sends ICMP packets to many different destinations (ping sweep)
   dns_burst     one host sends very many DNS queries
   dns_random    one host asks for many long, random-looking names (high character entropy): DGA malware or DNS tunnelling
   beaconing     a host contacts the same external (destination, port) at very regular intervals
@@ -32,6 +33,7 @@ class HeuristicConfig:
     scan_min_targets: int = 40          # distinct (destination, port, protocol) per host-window
     flood_min_packets: int = 600        # packets to a single destination per host-window (10 per second)
     arp_min: int = 200
+    icmp_sweep_min: int = 15            # distinct destinations hit with ICMP by one host in a window
     dns_min: int = 150                  # queries per host-window
     dns_random_min: int = 25            # random-looking names per host-window
     dns_random_entropy: float = 3.4     # bits per character of the name without dots (random 12-letter labels give about 3.3-3.6)
@@ -53,6 +55,7 @@ class _Window:
     per_dst_syn: dict = field(default_factory=lambda: defaultdict(int))
     per_dst_udp: dict = field(default_factory=lambda: defaultdict(int))
     arp: int = 0
+    icmp_dsts: set = field(default_factory=set)
     dns: int = 0
     random_names: int = 0
     random_examples: list = field(default_factory=list)
@@ -68,6 +71,8 @@ def window_features(packets, window_s: float) -> dict:
         w = out[(h, int(p.ts // window_s))]
         if p.proto == "arp":
             w.arp += 1
+        elif p.proto == "icmp":
+            w.icmp_dsts.add(p.dst)
         elif p.proto in ("tcp", "udp"):
             w.targets.add((p.dst, p.dport, p.proto))
             if p.proto == "tcp" and p.flags & SYN and not p.flags & ACK:
@@ -97,6 +102,7 @@ def calibrate(clean_packets, fpr: float = 0.01, window_s: float = 60.0) -> Heuri
     cfg.scan_min_targets = q((len(w.targets) for w in ws.values()), cfg.scan_min_targets)
     cfg.flood_min_packets = q((max(list(w.per_dst_syn.values()) + list(w.per_dst_udp.values()) + [0]) for w in ws.values()), cfg.flood_min_packets)
     cfg.arp_min = q((w.arp for w in ws.values()), cfg.arp_min)
+    cfg.icmp_sweep_min = q((len(w.icmp_dsts) for w in ws.values()), cfg.icmp_sweep_min)
     cfg.dns_min = q((w.dns for w in ws.values()), cfg.dns_min)
     cfg.dns_random_min = q((w.random_names for w in ws.values()), cfg.dns_random_min)
     return cfg

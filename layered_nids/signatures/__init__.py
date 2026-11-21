@@ -79,6 +79,10 @@ def scan(packets, cfg: HeuristicConfig | None = None, blocklists=None, trails=No
         if c.arp >= cfg.arp_min:
             out.append(Evidence("rules", h, ts(w), count_score(c.arp, cfg.arp_min), f"{h} sent {c.arp} ARP packets in {cfg.window_s:g}s (ARP flood or sweep)",
                                 {"signature": False, "trail": "arp_flood", "packets": c.arp}))
+        if len(c.icmp_dsts) >= cfg.icmp_sweep_min:
+            out.append(Evidence("rules", h, ts(w), count_score(len(c.icmp_dsts), cfg.icmp_sweep_min),
+                                f"{h} sent ICMP packets to {len(c.icmp_dsts)} different destinations in {cfg.window_s:g}s (ping sweep)",
+                                {"signature": False, "trail": "icmp_sweep", "destinations": len(c.icmp_dsts)}))
         if c.dns >= cfg.dns_min:
             out.append(Evidence("rules", h, ts(w), count_score(c.dns, cfg.dns_min), f"{h} sent {c.dns} DNS queries in {cfg.window_s:g}s",
                                 {"signature": False, "trail": "dns_burst", "queries": c.dns}))

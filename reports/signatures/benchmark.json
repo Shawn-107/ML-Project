@@ -4,6 +4,7 @@
   "scan_min_targets": 41,
   "flood_min_packets": 600,
   "arp_min": 200,
+  "icmp_sweep_min": 15,
   "dns_min": 150,
   "dns_random_min": 41,
   "dns_random_entropy": 3.4,
