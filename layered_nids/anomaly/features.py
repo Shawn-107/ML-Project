@@ -79,6 +79,42 @@ class _Novelty:
         return self.n_tgt.copy(), self.n_tgt / np.maximum(self.w, _EPS), self.n_dst.copy()
 
 
+class _Regular:
+    """Regularity of the gaps between a host's own connection starts towards one destination port (damped): recent count, mean gap,
+    std of the gaps and their ratio. A beacon phones home on a clock; ordinary browsing does not. Only new contacts update it
+    (TCP SYN without ACK, any UDP packet), so replies and long transfers do not look regular."""
+    __slots__ = ("lam", "w", "ls", "ss", "t", "last")
+
+    def __init__(self, lam):
+        self.lam = lam
+        self.w = np.zeros_like(lam)
+        self.ls = np.zeros_like(lam)
+        self.ss = np.zeros_like(lam)
+        self.t = None
+        self.last = None
+
+    def update(self, t: float, contact: bool):
+        if self.t is not None and t > self.t:
+            g = np.exp2(-self.lam * (t - self.t))
+            self.w *= g
+            self.ls *= g
+            self.ss *= g
+        if self.t is None or t > self.t:
+            self.t = t
+        if contact:
+            if self.last is not None and t - self.last > 0.5:
+                gap = t - self.last
+                self.w += 1.0
+                self.ls += gap
+                self.ss += gap * gap
+            if self.last is None or t - self.last > 0.5:
+                self.last = t
+        w = np.maximum(self.w, _EPS)
+        mean = self.ls / w
+        std = np.sqrt(np.abs(self.ss / w - mean * mean))
+        return self.w.copy(), mean, std, np.where(mean > _EPS, std / np.maximum(mean, _EPS), 0.0)
+
+
 class _Mix:
     """Protocol, TCP-flag and DNS mix per source host (damped counters)."""
     __slots__ = ("lam", "c", "t")
@@ -114,19 +150,21 @@ class _Mix:
         return c[1] / n, c[2] / n, c[3] / n, c[4] / n, c[5] / n, c[6].copy(), c[7] / np.maximum(c[6], _EPS)
 
 
-def feature_names(lambdas=DEFAULT_LAMBDAS) -> list[str]:
+def feature_names(lambdas=DEFAULT_LAMBDAS, regularity: bool = False) -> list[str]:
     one = ("weight", "mean", "std")
     two = one + ("magnitude", "radius", "cov", "corr")
     groups = (("host", one), ("channel", two), ("jitter", one), ("socket", two),
               ("novelty", ("new_targets", "new_target_share", "new_destinations")),
               ("mix", ("tcp_share", "udp_share", "other_share", "syn_share", "rst_share", "dns_count", "dns_entropy")))
+    if regularity:
+        groups = groups + (("regular", ("weight", "mean_gap", "std_gap", "cv")),)
     return [f"{g}_{s}_L{l:g}" for g, stats in groups for s in stats for l in lambdas]
 
 
 class PacketFeatures:
     """Stateful extractor: call `update(packet)` for packets in capture order; returns the feature vector for that packet."""
 
-    def __init__(self, lambdas=DEFAULT_LAMBDAS, max_streams: int = 100_000, idle_s: float = 1800.0):
+    def __init__(self, lambdas=DEFAULT_LAMBDAS, max_streams: int = 100_000, idle_s: float = 1800.0, regularity: bool = False):
         self.lam = np.asarray(lambdas, dtype=np.float64)
         lam = self.lam
         self.hosts = StreamTable(lambda: Stream1D(lam), max_streams, idle_s)
@@ -136,7 +174,9 @@ class PacketFeatures:
         self.novelty = StreamTable(lambda: _Novelty(lam), max_streams, idle_s)
         self.mix = StreamTable(lambda: _Mix(lam), max_streams, idle_s)
         self._last: dict = {}
-        self.n_features = PER_LAMBDA * len(self.lam)
+        self.regularity = regularity
+        self.regular = StreamTable(lambda: _Regular(lam), max_streams, idle_s) if regularity else None
+        self.n_features = (PER_LAMBDA + (4 if regularity else 0)) * len(self.lam)
 
     @staticmethod
     def _pair(a, b):
@@ -159,6 +199,10 @@ class PacketFeatures:
         sock = self.sockets.get(skey, t).update(sside, x, t)
         nov = self.novelty.get(p.src, t).update(p, t)
         mix = self.mix.get(p.src, t).update(p, t)
+        if self.regularity:
+            contact = (p.proto == "tcp" and bool(p.flags & _SYN) and not p.flags & _ACK) or p.proto == "udp"
+            reg = self.regular.get((p.src, p.dst, p.dport, p.proto), t).update(t, contact)
+            return np.concatenate([*host, *chan, *jit, *sock, *nov, *mix, *reg])
         return np.concatenate([*host, *chan, *jit, *sock, *nov, *mix])
 
     def run(self, packets) -> np.ndarray:

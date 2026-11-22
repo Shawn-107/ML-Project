@@ -147,11 +147,14 @@ def evaluate(model, hold, inj_seeds):
                "false_alarm_rate_uninvolved": float(flagged[clean].mean()), "kinds": {}}
         thr_or = float(np.quantile(scores[clean], 0.99))            # oracle threshold: 1% of uninvolved normal packets of THIS stream; same rule for every model
         res["false_alarm_rate_uninvolved_at_policy"] = float(flagged[clean].mean())
+        from layered_nids.anomaly.drift import adaptive_thresholds
+        adapt = scores >= adaptive_thresholds(scores, model.threshold, FPR)
+        res["false_alarm_rate_uninvolved_adaptive"] = float(adapt[clean].mean())
         for ep in episodes:
             m = labels == ep["kind"]
             y = np.r_[np.zeros(normal.sum()), np.ones(m.sum())]
             auc = float(roc_auc_score(y, np.r_[scores[normal], scores[m]]))
-            res["kinds"][ep["kind"]] = {"packet_recall": float(flagged[m].mean()), "recall_at_1pct_fa": float((scores[m] >= thr_or).mean()), "packet_auc": auc,
+            res["kinds"][ep["kind"]] = {"packet_recall": float(flagged[m].mean()), "recall_at_1pct_fa": float((scores[m] >= thr_or).mean()), "packet_recall_adaptive": float(adapt[m].mean()), "packet_auc": auc,
                                         "episode_detected": bool(episode_detected(stream, flagged, ep))}
         bad, hours = false_alert_windows(stream, flagged, labels, episodes)
         res["false_alert_windows"], res["hours"] = bad, hours
@@ -162,13 +165,15 @@ def evaluate(model, hold, inj_seeds):
 def summarise(all_rows: list) -> dict:
     out = {"false_alarm_rate_on_normal": [r["false_alarm_rate_on_normal"] for r in all_rows],
            "false_alarm_rate_uninvolved": [r["false_alarm_rate_uninvolved"] for r in all_rows],
+           "false_alarm_rate_uninvolved_adaptive": [r.get("false_alarm_rate_uninvolved_adaptive", float("nan")) for r in all_rows],
            "false_alert_windows_per_hour": [r["false_alert_windows"] / r["hours"] for r in all_rows], "kinds": {}}
     for kind in KINDS:
         rs = [r["kinds"][kind] for r in all_rows]
-        out["kinds"][kind] = {m: [x[m] for x in rs] for m in ("packet_recall", "recall_at_1pct_fa", "packet_auc", "episode_detected")}
+        out["kinds"][kind] = {m: [x[m] for x in rs] for m in ("packet_recall", "packet_recall_adaptive", "recall_at_1pct_fa", "packet_auc", "episode_detected")}
     ms = lambda v: {"mean": float(np.mean(v)), "std": float(np.std(v)), "n": len(v)}
     return {"false_alarm_rate_on_normal": ms(out["false_alarm_rate_on_normal"]),
             "false_alarm_rate_uninvolved": ms(out["false_alarm_rate_uninvolved"]),
+            "false_alarm_rate_uninvolved_adaptive": ms(out["false_alarm_rate_uninvolved_adaptive"]),
             "false_alert_windows_per_hour": ms(out["false_alert_windows_per_hour"]),
             "kinds": {k: {m: ms(np.asarray(v, float)) for m, v in d.items()} for k, d in out["kinds"].items()}}
 
@@ -209,7 +214,8 @@ def main(argv=None):
         k = results[name]["summary"]["kinds"]
         print(f"\n{name}  ({time.time() - t0:.0f}s, {len(rows)} runs = {len(list(mseeds))} model seeds x {len(inj)} injections)")
         print(f"  false alarms: all normal hold packets {results[name]['summary']['false_alarm_rate_on_normal']['mean']:.2%}, "
-              f"packets of hosts not involved in any attack {results[name]['summary']['false_alarm_rate_uninvolved']['mean']:.2%} | "
+              f"packets of hosts not involved in any attack {results[name]['summary']['false_alarm_rate_uninvolved']['mean']:.2%} "
+              f"(with the drift-aware threshold {results[name]['summary']['false_alarm_rate_uninvolved_adaptive']['mean']:.2%}) | "
               f"false alert windows/hour {results[name]['summary']['false_alert_windows_per_hour']['mean']:.1f}")
         for kind in KINDS:
             print(f"  {kind:10s} recall {k[kind]['packet_recall']['mean']:.2f}+-{k[kind]['packet_recall']['std']:.2f}  at 1% FA {k[kind]['recall_at_1pct_fa']['mean']:.2f}  "

@@ -156,3 +156,27 @@ def test_setup_check_reports_each_piece_with_a_fix():
     rows = setup_check.checks()
     assert rows and all(len(r) == 4 and isinstance(r[1], bool) and r[3] for r in rows)
     assert any("UNSW-NB15 training file" in r[0] for r in rows)
+
+
+def test_drift_threshold_keeps_the_false_alarm_rate_and_still_flags_attacks():
+    from layered_nids.anomaly.drift import DriftThreshold, adaptive_thresholds
+    rng = np.random.default_rng(0)
+    calib = rng.lognormal(0.0, 0.5, 20000)
+    thr0 = float(np.quantile(calib, 0.99))
+    later = rng.lognormal(0.0, 0.5, 30000) * np.linspace(1.0, 1.35, 30000)         # traffic drifts: normal scores creep up by 35%
+    fixed = (later >= thr0).mean()
+    assert fixed > 0.02                                                              # the fixed threshold overshoots its 1% target
+    thr = adaptive_thresholds(later, thr0)
+    assert (later >= thr)[10000:].mean() < 0.015 and thr.min() >= 0.7 * thr0 - 1e-9 and thr.max() <= 2.5 * thr0 + 1e-9
+    attack = np.concatenate([later[:5000], later[5000:5050] * 8, later[5050:9000]])  # 50 packets with scores 8x higher: far above the cap
+    assert (attack >= adaptive_thresholds(attack, thr0))[5000:5050].mean() > 0.95
+    d = DriftThreshold(thr0)                                                         # streaming gives exactly the same thresholds
+    assert np.allclose([d.update(s) for s in later[:6000]], thr[:6000])
+
+
+def test_regularity_option_adds_four_features_per_decay_rate_and_scores():
+    from layered_nids.anomaly.features import feature_names
+    fx = PacketFeatures(regularity=True)
+    X = fx.run(normal_traffic(300))
+    assert X.shape == (300, 136) and len(feature_names(regularity=True)) == 136 and np.isfinite(X).all()
+    assert PacketFeatures().run(normal_traffic(50)).shape == (50, 120)                  # the default stays at 120

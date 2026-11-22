@@ -18,7 +18,7 @@ Injection benchmark on real normal traffic (the first 52 minutes of the Mirai ca
 - DNS burst: 0.97 against 0.88 and 0.88 (AUC 0.964 against 0.959 and 0.905). The first default (log scaling) gave 0.66; the cause was found and fixed by scaling counts and rates linearly ("mixed" scaling, used automatically when there are at least 20,000 training packets).
 - Low-and-slow beacon: not found at packet level by any of the three; the rule layer finds regular new connections.
 - False alarms on normal packets of uninvolved hosts: 1.65% against 2.11% and 3.12% (target 1%: all three are above it because traffic drifts). False-alert windows per hour: 65.1 against 60.7 and 95.8.
-- Still behind our first version: false-alert windows per hour (+7%), normal packets of attacked hosts flagged (13.4% against 10.5%), beacon episodes found (0% against 22%).
+- The earlier gaps to our first version in false-alert windows per hour and in flagged normal packets of attacked hosts are inside the run-to-run noise (spread 21.5 and 16.3 windows per hour). The false-alarm drift above the 1% target is fixable with a drift-aware threshold (option `adaptive=True`: 1.65% -> 0.42%, at some recall cost at the policy threshold). Slow beacons cannot be found by a per-packet model (AUC 0.69-0.72); the rule layer finds them in 9 of 9 runs.
 - Speed: about 10,600 packets/s feature extraction; about 1,800 packets/s scoring one packet at a time (the original ran at 684 packets/s end to end on this machine).
 - Several design variants were tried on separate validation attacks and rejected (listed in the report); an optional two-view profile (`views=2`) exists.
 

@@ -16,6 +16,7 @@ import numpy as np
 
 from layered_nids.common.hosts import pick_internal
 from layered_nids.common.metrics import threshold_at_fpr
+from layered_nids.anomaly.drift import adaptive_thresholds
 from layered_nids.common.windows import fit_overdispersion, window_counts, windowed_evidence
 from layered_nids.anomaly import PacketAnomalyDetector
 from layered_nids.anomaly.features import PacketFeatures
@@ -81,13 +82,15 @@ def calibrate_cutoff(scores, train_n: int, n_calibration: int, fpr: float) -> tu
 
 
 def packet_evidence(data: dict, cutoff: float, first_index: int, fpr: float, window_s: float = 60.0,
-                    min_score: float = 0.5, rho: float = 0.0):
-    """Evidence for packets from `first_index` on. A packet is 'flagged' when its score is at least the cut-off.
+                    min_score: float = 0.5, rho: float = 0.0, adaptive: bool = False):
+    """Evidence for packets from `first_index` on. A packet is 'flagged' when its score is at least the cut-off
+    (adaptive=True: a drift-aware cut-off that starts at `cutoff`, see anomaly/drift.py).
     rho > 0 uses the burst-aware (beta-binomial) null, with `fpr` as the mean flag rate (see common/windows.py)."""
     hosts = data["hosts"][first_index:]
     keep = hosts != ""
     s = data["scores"][first_index:][keep]
-    return windowed_evidence("packets", hosts[keep], data["ts"][first_index:][keep], s >= cutoff, fpr,
+    thr = adaptive_thresholds(s, cutoff, fpr) if adaptive else cutoff
+    return windowed_evidence("packets", hosts[keep], data["ts"][first_index:][keep], s >= thr, fpr,
                              window_s, "packets", min_score, rho=rho)
 
 

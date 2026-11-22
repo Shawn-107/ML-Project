@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from layered_nids.anomaly.drift import adaptive_thresholds
 from layered_nids.anomaly.features import PacketFeatures, feature_names
 from layered_nids.anomaly.model import AE, AnomalyEnsemble, Prep, TwoViewEnsemble
 from layered_nids.common.hosts import pick_internal
@@ -35,11 +36,12 @@ def _sha(path: Path) -> str:
 
 
 class PacketAnomalyDetector:
-    def __init__(self, fpr: float = 0.01, window_s: float = 60.0, **model_kw):
+    def __init__(self, fpr: float = 0.01, window_s: float = 60.0, regularity: bool = False, **model_kw):
+        self.regularity = regularity
         self.fpr = fpr
         self.window_s = window_s
         self.model_kw = model_kw
-        self.features = PacketFeatures()
+        self.features = PacketFeatures(regularity=regularity)
         self.ens: AnomalyEnsemble | None = None
         self.threshold: float | None = None
         self.mu: float = fpr
@@ -60,8 +62,9 @@ class PacketAnomalyDetector:
         tail_part, thr_part = X_ca[:half], X_ca[half:]                     # the empirical tail and the threshold use different data
         kw = dict(self.model_kw)
         two = kw.pop("views", 1) == 2
-        self.ens = (TwoViewEnsemble if two else AnomalyEnsemble)(**kw).fit(X_tr, tail_part, names=feature_names())
+        self.ens = (TwoViewEnsemble if two else AnomalyEnsemble)(**kw).fit(X_tr, tail_part, names=feature_names(regularity=self.regularity))
         s_thr = self.ens.score(thr_part)
+        self.calib_scores = s_thr                                            # kept so a drift correction can compare later scores with these
         self.threshold = threshold_at_fpr(s_thr, self.fpr)
         s_all = self.ens.score(X_ca)                                       # burstiness of false alarms on normal windows
         hosts = [self.internal_host(p) for p in calib]
@@ -91,16 +94,18 @@ class PacketAnomalyDetector:
         self._need()
         return self.ens.score(self.features.run(packets))
 
-    def flag(self, scores: np.ndarray) -> np.ndarray:
-        return np.asarray(scores) >= self.threshold
+    def flag(self, scores: np.ndarray, adaptive: bool = False) -> np.ndarray:
+        """Packets whose score reaches the threshold. adaptive=True re-estimates the threshold as scoring goes on (anomaly/drift.py)."""
+        scores = np.asarray(scores)
+        return scores >= (adaptive_thresholds(scores, self.threshold, self.fpr) if adaptive else self.threshold)
 
-    def evidence(self, packets, scores, window_s: float | None = None, min_score: float = 0.5, burst_aware: bool = True):
+    def evidence(self, packets, scores, window_s: float | None = None, min_score: float = 0.5, burst_aware: bool = True, adaptive: bool = False):
         """Evidence (layer 'packets') per (internal host, window). Packets with no internal host are ignored."""
         w = window_s or self.window_s
         hosts = np.array([self.internal_host(p) for p in packets])
         keep = hosts != ""
         ts = np.array([p.ts for p in packets])
-        flagged = np.asarray(scores) >= self.threshold
+        flagged = self.flag(scores, adaptive)
         rho = self.rho if burst_aware else 0.0
         return windowed_evidence("packets", hosts[keep], ts[keep], flagged[keep], max(self.mu, 1e-4) if rho > 0 else self.fpr,
                                  w, "packets", min_score, rho=rho)

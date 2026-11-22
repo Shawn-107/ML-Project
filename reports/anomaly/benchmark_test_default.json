@@ -22,6 +22,11 @@
      "std": 0.006272589900259363,
      "n": 9
     },
+    "false_alarm_rate_uninvolved_adaptive": {
+     "mean": 0.0042332018685676395,
+     "std": 0.002062517877485067,
+     "n": 9
+    },
     "false_alert_windows_per_hour": {
      "mean": 65.11920900663216,
      "std": 21.49886200593012,
@@ -32,6 +37,11 @@
       "packet_recall": {
        "mean": 0.9859259259259259,
        "std": 0.0026189140043946426,
+       "n": 9
+      },
+      "packet_recall_adaptive": {
+       "mean": 0.9544444444444444,
+       "std": 0.031700761372638,
        "n": 9
       },
       "recall_at_1pct_fa": {
@@ -56,6 +66,11 @@
        "std": 0.0013146843962443604,
        "n": 9
       },
+      "packet_recall_adaptive": {
+       "mean": 0.9901111111111113,
+       "std": 0.005952486771546172,
+       "n": 9
+      },
       "recall_at_1pct_fa": {
        "mean": 0.9929999999999999,
        "std": 0.0018257418583505554,
@@ -76,6 +91,11 @@
       "packet_recall": {
        "mean": 0.9957037037037038,
        "std": 0.00042873470010333604,
+       "n": 9
+      },
+      "packet_recall_adaptive": {
+       "mean": 0.9949629629629629,
+       "std": 0.001658829309374721,
        "n": 9
       },
       "recall_at_1pct_fa": {
@@ -100,6 +120,11 @@
        "std": 0.000272165526975919,
        "n": 9
       },
+      "packet_recall_adaptive": {
+       "mean": 0.9971111111111112,
+       "std": 0.0010061539042374916,
+       "n": 9
+      },
       "recall_at_1pct_fa": {
        "mean": 0.9993703703703704,
        "std": 0.0007444352311941328,
@@ -120,6 +145,11 @@
       "packet_recall": {
        "mean": 0.9761574074074074,
        "std": 0.007421860899019177,
+       "n": 9
+      },
+      "packet_recall_adaptive": {
+       "mean": 0.8699074074074074,
+       "std": 0.035615064012809054,
        "n": 9
       },
       "recall_at_1pct_fa": {
@@ -144,6 +174,11 @@
        "std": 0.0,
        "n": 9
       },
+      "packet_recall_adaptive": {
+       "mean": 0.9992129629629629,
+       "std": 0.0013811512861274457,
+       "n": 9
+      },
       "recall_at_1pct_fa": {
        "mean": 1.0,
        "std": 0.0,
@@ -164,6 +199,11 @@
       "packet_recall": {
        "mean": 0.027777777777777776,
        "std": 0.0526448379421492,
+       "n": 9
+      },
+      "packet_recall_adaptive": {
+       "mean": 0.0,
+       "std": 0.0,
        "n": 9
       },
       "recall_at_1pct_fa": {
@@ -193,47 +233,55 @@
       "hscan": {
        "packet_recall": 0.9866666666666667,
        "recall_at_1pct_fa": 0.9766666666666667,
+       "packet_recall_adaptive": 0.91,
        "packet_auc": 0.9690944405403294,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.993,
        "recall_at_1pct_fa": 0.991,
+       "packet_recall_adaptive": 0.996,
        "packet_auc": 0.9919327125790584,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9956666666666667,
        "recall_at_1pct_fa": 0.9946666666666667,
+       "packet_recall_adaptive": 0.9946666666666667,
        "packet_auc": 0.9982656164597485,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 0.9993333333333333,
        "recall_at_1pct_fa": 0.998,
+       "packet_recall_adaptive": 0.9976666666666667,
        "packet_auc": 0.9988314007964393,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9708333333333333,
        "recall_at_1pct_fa": 0.9520833333333333,
+       "packet_recall_adaptive": 0.8479166666666667,
        "packet_auc": 0.9679312338955258,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.9986403431717031,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.5824862798246494,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.021812596006144394,
+     "false_alarm_rate_uninvolved_adaptive": 0.004301075268817204,
      "false_alert_windows": 10,
      "hours": 0.17403978804747264
     },
@@ -245,47 +293,55 @@
       "hscan": {
        "packet_recall": 0.9866666666666667,
        "recall_at_1pct_fa": 0.9833333333333333,
+       "packet_recall_adaptive": 0.9433333333333334,
        "packet_auc": 0.9515112828921684,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.995,
        "recall_at_1pct_fa": 0.994,
+       "packet_recall_adaptive": 0.981,
        "packet_auc": 0.9837996017802764,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9956666666666667,
        "recall_at_1pct_fa": 0.9953333333333333,
+       "packet_recall_adaptive": 0.9966666666666667,
        "packet_auc": 0.9967730147575545,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 0.9996666666666667,
        "recall_at_1pct_fa": 0.999,
+       "packet_recall_adaptive": 0.9963333333333333,
        "packet_auc": 0.9978186343405949,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9729166666666667,
        "recall_at_1pct_fa": 0.9666666666666667,
+       "packet_recall_adaptive": 0.8479166666666667,
        "packet_auc": 0.9496622940579371,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.9970833333333333,
        "packet_auc": 0.997303037401421,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.6162994009972225,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.011257953989231522,
+     "false_alarm_rate_uninvolved_adaptive": 0.0041605482134116495,
      "false_alert_windows": 17,
      "hours": 0.17403978804747264
     },
@@ -297,47 +353,55 @@
       "hscan": {
        "packet_recall": 0.9833333333333333,
        "recall_at_1pct_fa": 0.9766666666666667,
+       "packet_recall_adaptive": 0.99,
        "packet_auc": 0.9695682048879519,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.993,
        "recall_at_1pct_fa": 0.991,
+       "packet_recall_adaptive": 0.992,
        "packet_auc": 0.9944810260014054,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9956666666666667,
        "recall_at_1pct_fa": 0.995,
+       "packet_recall_adaptive": 0.9926666666666667,
        "packet_auc": 0.9983189271492152,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.9956666666666667,
        "packet_auc": 0.999297337393613,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9666666666666667,
        "recall_at_1pct_fa": 0.95,
+       "packet_recall_adaptive": 0.8395833333333333,
        "packet_auc": 0.9664645067150778,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.9990695762083236,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.7205110347020045,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.01772525849335303,
+     "false_alarm_rate_uninvolved_adaptive": 0.0008440599282549061,
      "false_alert_windows": 11,
      "hours": 0.17403978804747264
     },
@@ -349,47 +413,55 @@
       "hscan": {
        "packet_recall": 0.9833333333333333,
        "recall_at_1pct_fa": 0.98,
+       "packet_recall_adaptive": 0.9,
        "packet_auc": 0.9690608651518701,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.993,
        "recall_at_1pct_fa": 0.992,
+       "packet_recall_adaptive": 0.995,
        "packet_auc": 0.9919704848910752,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9953333333333333,
        "recall_at_1pct_fa": 0.9946666666666667,
+       "packet_recall_adaptive": 0.995,
        "packet_auc": 0.9982579643944718,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 0.9993333333333333,
        "recall_at_1pct_fa": 0.9986666666666667,
+       "packet_recall_adaptive": 0.998,
        "packet_auc": 0.9988443819786054,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9708333333333333,
        "recall_at_1pct_fa": 0.9604166666666667,
+       "packet_recall_adaptive": 0.8458333333333333,
        "packet_auc": 0.9694588408682752,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.998588345240884,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.616742796907941,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.015053763440860216,
+     "false_alarm_rate_uninvolved_adaptive": 0.0052227342549923195,
      "false_alert_windows": 6,
      "hours": 0.17403978804747264
     },
@@ -401,47 +473,55 @@
       "hscan": {
        "packet_recall": 0.9833333333333333,
        "recall_at_1pct_fa": 0.99,
+       "packet_recall_adaptive": 0.95,
        "packet_auc": 0.9521943078004217,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.994,
        "recall_at_1pct_fa": 0.996,
+       "packet_recall_adaptive": 0.98,
        "packet_auc": 0.9838247247598968,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.995,
        "recall_at_1pct_fa": 0.996,
+       "packet_recall_adaptive": 0.9966666666666667,
        "packet_auc": 0.9967683883813541,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 0.9996666666666667,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.997,
        "packet_auc": 0.9978235925665652,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9729166666666667,
        "recall_at_1pct_fa": 0.98125,
+       "packet_recall_adaptive": 0.8458333333333333,
        "packet_auc": 0.9521468972046537,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.99625,
        "packet_auc": 0.997310894432732,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.5735347020044842,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.0075868820362212435,
+     "false_alarm_rate_uninvolved_adaptive": 0.005628976994615761,
      "false_alert_windows": 13,
      "hours": 0.17403978804747264
     },
@@ -453,47 +533,55 @@
       "hscan": {
        "packet_recall": 0.9833333333333333,
        "recall_at_1pct_fa": 0.9766666666666667,
+       "packet_recall_adaptive": 0.99,
        "packet_auc": 0.9694456156789256,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.993,
        "recall_at_1pct_fa": 0.992,
+       "packet_recall_adaptive": 0.992,
        "packet_auc": 0.9945084328882643,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9953333333333333,
        "recall_at_1pct_fa": 0.995,
+       "packet_recall_adaptive": 0.9923333333333333,
        "packet_auc": 0.9983113922073865,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.9956666666666667,
        "packet_auc": 0.9992956976653392,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9729166666666667,
        "recall_at_1pct_fa": 0.9645833333333333,
+       "packet_recall_adaptive": 0.8416666666666667,
        "packet_auc": 0.9687924572499415,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.9990062563441868,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.14285714285714285,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.7993068801659806,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.013293943870014771,
+     "false_alarm_rate_uninvolved_adaptive": 0.0016881198565098122,
      "false_alert_windows": 6,
      "hours": 0.17403978804747264
     },
@@ -505,47 +593,55 @@
       "hscan": {
        "packet_recall": 0.99,
        "recall_at_1pct_fa": 0.98,
+       "packet_recall_adaptive": 0.95,
        "packet_auc": 0.9690805809323026,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.995,
        "recall_at_1pct_fa": 0.992,
+       "packet_recall_adaptive": 0.997,
        "packet_auc": 0.9928450456781448,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9963333333333333,
        "recall_at_1pct_fa": 0.995,
+       "packet_recall_adaptive": 0.9953333333333333,
        "packet_auc": 0.9983620871398454,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 0.9986666666666667,
+       "packet_recall_adaptive": 0.9986666666666667,
        "packet_auc": 0.998940989302725,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9854166666666667,
        "recall_at_1pct_fa": 0.9729166666666667,
+       "packet_recall_adaptive": 0.9208333333333333,
        "packet_auc": 0.9722173420785508,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.9988114654095417,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.5411500686008768,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.027649769585253458,
+     "false_alarm_rate_uninvolved_adaptive": 0.0052227342549923195,
      "false_alert_windows": 11,
      "hours": 0.17403978804747264
     },
@@ -557,47 +653,55 @@
       "hscan": {
        "packet_recall": 0.99,
        "recall_at_1pct_fa": 0.99,
+       "packet_recall_adaptive": 0.9666666666666667,
        "packet_auc": 0.9509894979308192,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.997,
        "recall_at_1pct_fa": 0.996,
+       "packet_recall_adaptive": 0.986,
        "packet_auc": 0.9865874619348793,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.9963333333333333,
        "recall_at_1pct_fa": 0.9963333333333333,
+       "packet_recall_adaptive": 0.9973333333333333,
        "packet_auc": 0.9970402514250021,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.998,
        "packet_auc": 0.9979791129850863,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9895833333333334,
        "recall_at_1pct_fa": 0.9895833333333334,
+       "packet_recall_adaptive": 0.9208333333333333,
        "packet_auc": 0.9555464052861716,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.9995833333333334,
        "packet_auc": 0.9976346919653314,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.0,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.5600058980022086,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.010768477728830151,
+     "false_alarm_rate_uninvolved_adaptive": 0.008076358296622614,
      "false_alert_windows": 17,
      "hours": 0.17403978804747264
     },
@@ -609,47 +713,55 @@
       "hscan": {
        "packet_recall": 0.9866666666666667,
        "recall_at_1pct_fa": 0.98,
+       "packet_recall_adaptive": 0.99,
        "packet_auc": 0.9694625985789022,
        "episode_detected": true
       },
       "vscan": {
        "packet_recall": 0.995,
        "recall_at_1pct_fa": 0.993,
+       "packet_recall_adaptive": 0.992,
        "packet_auc": 0.9951297727805106,
        "episode_detected": true
       },
       "syn_flood": {
        "packet_recall": 0.996,
        "recall_at_1pct_fa": 0.995,
+       "packet_recall_adaptive": 0.994,
        "packet_auc": 0.9983962286249707,
        "episode_detected": true
       },
       "udp_flood": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 0.997,
        "packet_auc": 0.9993215233856485,
        "episode_detected": true
       },
       "dns_burst": {
        "packet_recall": 0.9833333333333333,
        "recall_at_1pct_fa": 0.9729166666666667,
+       "packet_recall_adaptive": 0.91875,
        "packet_auc": 0.9722358866245022,
        "episode_detected": true
       },
       "exfil": {
        "packet_recall": 1.0,
        "recall_at_1pct_fa": 1.0,
+       "packet_recall_adaptive": 1.0,
        "packet_auc": 0.9991304560006247,
        "episode_detected": true
       },
       "beacon": {
        "packet_recall": 0.10714285714285714,
        "recall_at_1pct_fa": 0.0,
+       "packet_recall_adaptive": 0.0,
        "packet_auc": 0.7168833450456781,
        "episode_detected": false
       }
      },
      "false_alarm_rate_uninvolved_at_policy": 0.023422663009073644,
+     "false_alarm_rate_uninvolved_adaptive": 0.0029542097488921715,
      "false_alert_windows": 11,
      "hours": 0.17403978804747264
     }
