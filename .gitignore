@@ -49,3 +49,12 @@ layered_nids/realtools/
 
 # local-only reference column of the benchmark
 layered_nids/anomaly/_reference_original.py
+
+# --- repository scope (2026-11-22): code and trained flow models only; everything else stays local ---
+reports/
+CLAUDE.md
+legacy/**/reports/
+legacy/**/models/
+!models/csv/
+!models/csv/*.joblib
+!models/csv/*.meta.json

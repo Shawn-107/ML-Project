@@ -7,13 +7,13 @@ A network intrusion detection system where machine learning is the core, combine
 - per-host evidence fusion (noisy-OR with decay, and a learned combiner);
 - a dashboard with CSV upload.
 
-MSc AI/ML coursework (Advanced Machine Learning, MAI511-2). Full brief, measured results and honest limits: `CLAUDE.md`. Final report: `reports/FINAL_REPORT.md`.
+MSc AI/ML coursework (Advanced Machine Learning, MAI511-2). This repository holds the code and the trained flow models only; the project brief, measured reports and data are kept locally by the author.
 
 ## Set up from a fresh clone (Windows, Python 3.13)
 1. Environment: follow the build lines at the top of `requirements-313.txt` (a Python 3.13 venv, `pip install -r requirements-313.txt`, then `pip install --no-deps -e . -e legacy/nids_backend`).
 2. Data: put the files listed in `data/SOURCES.md` where it says (UNSW-NB15 files in `data/unsw/` are required; the Mirai capture, DGA list, NetFlow file and an indicator file are optional).
 3. Check what is missing: `python -m layered_nids.setup_check` prints each missing piece and the command that fixes it.
-4. Train the models (they are not in the repository): `python -m layered_nids.csvmode.models train` (add `--which unsw34` to train only the UNSW flow model).
+4. Models: trained flow models are included in `models/csv/` (each has a SHA-256 in its `.meta.json`; they are pickles, so only load files from a source you trust). To retrain them: `python -m layered_nids.csvmode.models train` (add `--which unsw34` for only the UNSW flow model).
 5. Tests: `python -m pytest tests` (tests that need data you did not supply are skipped or fail with a clear message from step 3).
 
 ## Run
@@ -24,8 +24,8 @@ MSc AI/ML coursework (Advanced Machine Learning, MAI511-2). Full brief, measured
 - Packet detector: the default scaling is chosen automatically (mixed scaling with at least 20,000 training packets, robust log scaling below that). `PacketAnomalyDetector(views=2)` combines two scalings (more sensitive, more false-alert windows); see `reports/anomaly/REPORT.md`.
 
 ## Not in this repository (by design)
-- Datasets (UNSW-NB15, DGA lists, the Mirai capture): see `data/SOURCES.md`.
-- Trained model files (pickles; rebuild with the training commands), score caches, virtual environments, passwords and local configuration.
+- Reports and the project brief (kept locally), datasets (see `data/SOURCES.md` for where to get them), score caches, the credits and reference material, virtual environments, passwords and local configuration.
+- The packet detector is trained per run from a capture and is not shipped as a file.
 
 ## Honest limits
 Results on the unlabelled Mirai capture are descriptive (no labels, so no recall is measured there). Packet-detector and rule benchmarks use synthetic injected attacks, which measure whether a behaviour is noticed, not accuracy on real attacks. Fusion results come from a simulation. UNSW-NB15 is 2015 lab traffic and its official test is shifted from training. No live capture was tested (dataset tests only). See `CLAUDE.md` section 12.
