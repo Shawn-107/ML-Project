@@ -53,6 +53,7 @@ VARIANTS = {                                    # own variants (validated, then 
     "nids_v2_corr_hybrid8": dict(score_mode="hybrid", topk=8, grouping="correlation"),
     "nids_v2_corr_output_ae": dict(score_mode="output_ae", grouping="correlation"),
     "nids_v2_two_view": dict(views=2),
+    "nids_v2_mixed": dict(scaling="mixed"),
     "nids_v2_minmax_output_ae": dict(score_mode="output_ae", grouping="correlation", scaling="minmax"),
     "nids_v2_minmax_family_output_ae": dict(score_mode="output_ae", grouping="family", scaling="minmax"),
     "nids_v2_family_tail_top12": dict(score_mode="tail_sum", topk=12, grouping="family"),

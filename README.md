@@ -21,7 +21,7 @@ MSc AI/ML coursework (Advanced Machine Learning, MAI511-2). Full brief, measured
 - CSV flow files: `python -m layered_nids.csvmode FILE.csv`
 - Dashboard: `python -m layered_nids.dashboard --init-user NAME` (prints where the random password is stored), then
   `python -m layered_nids.dashboard --data reports/pipeline --port 8338` and open http://127.0.0.1:8338 (localhost only). Press Ctrl+K in the page for the command palette.
-- Packet detector profiles: the default is robust (fewest false-alert windows); `PacketAnomalyDetector(views=2)` is more sensitive to rate-type attacks such as DNS bursts at the cost of more false-alert windows (`reports/anomaly/REPORT.md`).
+- Packet detector: the default scaling is chosen automatically (mixed scaling with at least 20,000 training packets, robust log scaling below that). `PacketAnomalyDetector(views=2)` combines two scalings (more sensitive, more false-alert windows); see `reports/anomaly/REPORT.md`.
 
 ## Not in this repository (by design)
 - Datasets (UNSW-NB15, DGA lists, the Mirai capture): see `data/SOURCES.md`.

@@ -13,13 +13,14 @@ A network intrusion detection system whose layers are all our own code:
 ## 2. Results
 ### Packet anomaly detector (`reports/anomaly/REPORT.md`)
 Injection benchmark on real normal traffic (the first 52 minutes of the Mirai capture, split in time order) with synthetic attacks; 3 model seeds x 3 injection seeds; models compared at the SAME false-alarm rate (recall at 1% false alarms on the normal packets of uninvolved hosts). This measures whether a behaviour is noticed, not accuracy on real attacks. Our detector against our first version against the original reference detector:
-- Horizontal scan: recall 0.99 against 0.14 and 0.15 (AUC 0.986 against 0.822 and 0.815).
+- Horizontal scan: recall 0.98 against 0.14 and 0.15 (AUC 0.963 against 0.822 and 0.815).
 - Port scan, SYN flood, UDP flood, bulk upload: about 1.00 for all three.
-- DNS burst: **0.66 against 0.88 and 0.88 (worse)**. The optional sensitive profile (`views=2`) gives 0.92, at the cost of more false-alert windows (95.8 per hour against 60). The rule layer also finds this behaviour.
+- DNS burst: 0.97 against 0.88 and 0.88 (AUC 0.964 against 0.959 and 0.905). The first default (log scaling) gave 0.66; the cause was found and fixed by scaling counts and rates linearly ("mixed" scaling, used automatically when there are at least 20,000 training packets).
 - Low-and-slow beacon: not found at packet level by any of the three; the rule layer finds regular new connections.
-- False alarms on normal packets of uninvolved hosts: 1.88% against 2.11% and 3.12% (target 1%: all three are above it because traffic drifts).
+- False alarms on normal packets of uninvolved hosts: 1.65% against 2.11% and 3.12% (target 1%: all three are above it because traffic drifts). False-alert windows per hour: 65.1 against 60.7 and 95.8.
+- Still behind our first version: false-alert windows per hour (+7%), normal packets of attacked hosts flagged (13.4% against 10.5%), beacon episodes found (0% against 22%).
 - Speed: about 10,600 packets/s feature extraction; about 1,800 packets/s scoring one packet at a time (the original ran at 684 packets/s end to end on this machine).
-- Several design variants were tried on separate validation attacks and rejected (listed in the report).
+- Several design variants were tried on separate validation attacks and rejected (listed in the report); an optional two-view profile (`views=2`) exists.
 
 ### Signature and heuristic rules (`reports/signatures/REPORT.md`)
 - Injected behaviours (scan, port scan, SYN flood, UDP flood, DNS burst, web attacks, regular beacon connections) found 3 of 3 times each; bulk upload not found (the packet model finds it). Synthetic attacks written by the same author as the rules.
@@ -28,7 +29,7 @@ Injection benchmark on real normal traffic (the first 52 minutes of the Mirai ca
 - Limits: plain HTTP request lines and TLS server names only (no bodies, headers or TLS fingerprints); TLS server-name parsing was tested on crafted data, the Mirai capture contains none.
 
 ### Combined pipeline on the Mirai capture (`reports/pipeline/mirai.json`, unlabelled, descriptive)
-The packet scores jump at minute 74.3. Alert threshold tuned on the first half of the stretch assumed normal and checked on the second half. Packet layer alone: 50 alerts on 7 hosts after the jump, none before. With the rules layer: 66 alerts, 7 of them before the jump (2 hosts, minutes 47.6 and 66.6): possible false alerts or real early activity, which cannot be told without labels. No recall or false-alarm rate is measured on this capture.
+The packet scores jump at minute 74.3. Alert threshold tuned on the first half of the stretch assumed normal and checked on the second half. Packet layer alone: 50 alerts on 7 hosts after the jump, none before. With the rules layer: 67 alerts, 8 of them before the jump (3 hosts, minutes 47.6, 66.6 and 69.6; re-run with the newer detector default and rules): possible false alerts or real early activity, which cannot be told without labels. No recall or false-alarm rate is measured on this capture.
 
 ### DGA classifier (`reports/dga/REPORT.md`)
 Unseen-family evaluation, 5 folds, recall at 1% false alarms: n-gram 72.1% +- 8.4, character CNN 74.4% +- 10.5, average of both 74.8% +- 9.2 (AUC 0.961, Brier 0.076). The average beats the n-gram model in all 5 folds (about +2.7 points) but the CNN in only 3 of 5 (+0.4, inside the fold spread). The benign side is a top-sites list, so false alarms on real DNS are untested.
@@ -63,7 +64,7 @@ Checked over HTTP and in a real browser engine (headless Edge): every page rende
 
 ## 4. Limits (summary)
 - UNSW-NB15 is 2015 lab traffic; accuracy about 89%, never 90%.
-- No labelled packet data was used; the benchmarks use injected synthetic attacks. The packet detector is worse than the original on DNS bursts by default, and nothing finds slow beacons at packet level.
+- No labelled packet data was used; the benchmarks use injected synthetic attacks. Nothing finds slow beacons at packet level (the rule layer does).
 - The indicator data is a local, non-redistributable file; without it the rule layer cannot match known-bad indicators.
 - Fusion numbers are from a simulation.
 - Replay and CSV are not live detection.

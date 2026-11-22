@@ -4,6 +4,7 @@
  "settings": {
   "name": null,
   "rules": true,
+  "external_sensor": false,
   "cache": null,
   "limit": null,
   "train": 55000,
@@ -13,7 +14,7 @@
   "null": "burst",
   "alert_p": null,
   "budget": 0,
-  "out": "reports/pipeline/mirai.json"
+  "out": null
  },
  "alert_p_used": 0.9999999,
  "tuning": {
@@ -751,10 +752,10 @@
   "jump_packet": 121542,
   "jump_minute": 74.3,
   "evidence_windows": 388,
-  "cache_used": false
+  "cache_used": true
  },
  "rules": {
-  "evidence_items": 327,
+  "evidence_items": 565,
   "signature_hits": 0,
   "first_event_minutes": [
    -0.4,
@@ -827,19 +828,19 @@
    "alerts_after_jump": 9
   },
   "policy_all_layers": {
-   "alerts": 66,
+   "alerts": 67,
    "hosts_alerted": 8,
    "alerts_per_host_top5": {
     "192.168.2.115": 12,
     "192.168.2.1": 11,
-    "192.168.2.110": 9,
+    "192.168.2.110": 10,
     "192.168.2.107": 8,
     "192.168.2.118": 8
    },
    "first_alert_minute_per_host": {
     "192.168.2.115": 47.6,
     "192.168.2.1": 66.6,
-    "192.168.2.110": 74.6,
+    "192.168.2.110": 69.6,
     "192.168.2.107": 76.5,
     "192.168.2.118": 77.6,
     "192.168.2.103": 77.6,
@@ -847,40 +848,40 @@
     "192.168.2.196": 78.0
    },
    "severity": {
-    "critical": 66
+    "critical": 67
    },
    "layers_in_alerts": {
-    "rules": 32,
-    "packets": 66
+    "rules": 33,
+    "packets": 67
    },
-   "alerts_before_jump": 7,
+   "alerts_before_jump": 8,
    "alerts_after_jump": 59
   },
   "need_packets_and_rules": {
-   "alerts": 32,
+   "alerts": 33,
    "hosts_alerted": 3,
    "alerts_per_host_top5": {
     "192.168.2.115": 12,
     "192.168.2.1": 11,
-    "192.168.2.110": 9
+    "192.168.2.110": 10
    },
    "first_alert_minute_per_host": {
     "192.168.2.115": 47.6,
     "192.168.2.1": 66.6,
-    "192.168.2.110": 74.6
+    "192.168.2.110": 69.6
    },
    "severity": {
-    "critical": 32
+    "critical": 33
    },
    "layers_in_alerts": {
-    "rules": 32,
-    "packets": 32
+    "rules": 33,
+    "packets": 33
    },
-   "alerts_before_jump": 7,
+   "alerts_before_jump": 8,
    "alerts_after_jump": 25
   }
  },
  "note": "UNLABELLED capture: descriptive only. 'before/after jump' splits at the first point where the packet detector's scores stay above its cut-off; it is not a labelled attack start. No recall or false-alarm rate is measured.",
- "alerts_file": "reports\\pipeline\\mirai.alerts.jsonl",
- "events_file": "reports\\pipeline\\mirai.events.jsonl"
+ "alerts_file": "C:\\ML project 2\\reports\\pipeline\\mirai.alerts.jsonl",
+ "events_file": "C:\\ML project 2\\reports\\pipeline\\mirai.events.jsonl"
 }

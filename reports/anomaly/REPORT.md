@@ -12,13 +12,22 @@ Final numbers: `benchmark_test_v2.json` (v2, default), `benchmark_test_v2_minmax
 - Threshold policy: score that at most 1% of held-out normal packets exceed. Evidence per (host, 60 s window) from the count of flagged packets against the false-alarm rate (beta-binomial when calibration windows show bursty false alarms).
 - Streaming (`process`, one packet at a time) gives the same scores as batch (tested). Save/load with SHA-256 check; weights loaded with `weights_only`.
 
+## Current default (2026-11-22): mixed scaling
+The DNS-burst weakness below had one cause: the log scaling used for every non-negative feature squeezes rate and count features, so a burst's size is partly lost. The fix: logs for sizes and gaps, linear (quantile-scaled) for counts and rates ("mixed"). It is used automatically when the training set has at least 20,000 packets (`scaling="auto"`); smaller training sets keep the robust log scaling, because mixed scaling flags too much normal traffic when it has little to learn from (shown by the synthetic test in `tests/test_pipeline.py`).
+Chosen on validation injections (6 injections x 2 model seeds, `validate_v2l.json`), final numbers on the test injections (`benchmark_test_default.json`, 3 model seeds x 3 injections), our detector against our first version against the original reference detector:
+- Recall at 1% false alarms: horizontal scan 0.98 / 0.14 / 0.15; port scan 0.99 / 0.97 / 0.98; SYN flood, UDP flood, bulk upload 1.00 / 0.99-1.00 / 0.99-1.00; DNS burst **0.97 / 0.88 / 0.88** (now better, was 0.66).
+- AUC: horizontal scan 0.963 / 0.822 / 0.815; DNS burst 0.964 / 0.959 / 0.905.
+- False alarms on uninvolved hosts 1.65% / 2.11% / 3.12% (target 1%, all above it). False-alert windows per hour 65.1 / 60.7 / 95.8. Normal packets of attacking and attacked hosts flagged 13.4% / 10.5% / 14.4%.
+- Still not better: slow beacon unseen at packet level by all three (episodes found 0% / 22% / 33%; the rule layer finds it); false-alert windows per hour are 7% above our first version; normal packets of attacked hosts are flagged more often than by our first version.
+- The earlier default (log scaling) is `scaling="quantile_log"`; the numbers below were measured with it.
+
 ## How it was tested (injection benchmark)
 No labelled packet capture is on this machine. So: real normal traffic (first 52 minutes of the Mirai capture, split in time order 60/20/20 into train / calibration / hold) with synthetic attacks merged into the hold part, each from an existing internal host: horizontal scan (300 targets), port scan (1,000 ports), SYN flood, UDP flood, DNS burst of random names, bulk upload, and a low-and-slow beacon (28 packets, one every 15 s).
 **This measures whether a detector notices these behaviours. It does not measure accuracy on real attacks.**
 All models: same training data, same 1% calibration policy, same attacked streams. Spread: 3 model seeds x 3 injection seeds (9 runs). Variants were chosen on different injections (seeds 100-105), never on the test seeds (0-2).
 "Recall at 1% FA" uses, for every model alike, the threshold that 1% of the normal packets of uninvolved hosts exceed in that stream, so it compares models at the SAME false-alarm rate (the policy threshold does not: traffic drifts away from the calibration part, so models flag more than 1% on the hold part).
 
-## Results (test seeds; mean over 9 runs)
+## Results with the EARLIER default, log scaling (test seeds; mean over 9 runs)
 Recall at 1% FA / packet AUC / attacker host got an improbable window (p <= 1e-6) during the attack:
 - horizontal scan: v2 0.99 / 0.986 / 100%; first version 0.14 / 0.822 / 78%; reference 0.15 / 0.815 / 100%.
 - port scan: v2 0.99 / 0.994 / 100%; first 0.97 / 0.990 / 100%; reference 0.98 / 0.938 / 100%.

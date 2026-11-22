@@ -32,9 +32,17 @@ class Prep:
     def __init__(self, mode: str = "quantile_log"):
         self.mode = mode
 
-    def fit(self, X: np.ndarray) -> "Prep":
+    COUNT_PREFIXES = ("host_weight", "channel_weight", "jitter_weight", "socket_weight", "novelty_new_targets", "novelty_new_destinations", "mix_dns_count")
+
+    def fit(self, X: np.ndarray, names: list | None = None) -> "Prep":
         X = np.asarray(X, dtype=np.float64)
-        if self.mode == "minmax":                                   # plain min-max: large values stay large (sensitive to rate-like attacks)
+        if self.mode == "mixed":                                    # logs for sizes and gaps, but counts and rates stay linear so a burst keeps its size
+            is_count = np.array([n.startswith(self.COUNT_PREFIXES) for n in names]) if names is not None else np.zeros(X.shape[1], bool)   # no names: same as quantile_log
+            self.log = (X.min(0) >= 0.0) & ~is_count
+            Z = self._log(X)
+            self.lo = np.quantile(Z, 0.005, axis=0)
+            hi = np.quantile(Z, 0.995, axis=0)
+        elif self.mode == "minmax":                                   # plain min-max: large values stay large (sensitive to rate-like attacks)
             self.log = np.zeros(X.shape[1], bool)
             self.lo, hi = X.min(0), X.max(0)
         else:
@@ -112,7 +120,7 @@ def family_groups(names: list[str]) -> list[np.ndarray]:
 class AnomalyEnsemble:
     def __init__(self, max_group: int = 10, hidden_ratio: float = 0.75, epochs: int = 12, batch: int = 256, lr: float = 5e-3,
                  noise: float = 0.0, score_mode: str = "output_ae", topk: int = 3, seed: int = 0, grouping: str = "correlation",
-                 scaling: str = "quantile_log"):
+                 scaling: str = "auto"):
         if score_mode not in ("output_ae", "tail_sum", "hybrid"):
             raise ValueError("score_mode must be 'output_ae', 'tail_sum' or 'hybrid'")
         if grouping not in ("correlation", "family"):
@@ -131,7 +139,10 @@ class AnomalyEnsemble:
         torch.manual_seed(c["seed"])
         gen = torch.Generator().manual_seed(c["seed"])
         X_train = np.asarray(X_train, dtype=np.float64)
-        self.prep = Prep(c["scaling"]).fit(X_train)
+        mode = c["scaling"]
+        if mode == "auto":                                     # "mixed" needs enough normal data to know the real range of counts; small training sets get the robust scaling
+            mode = "mixed" if len(X_train) >= 20_000 else "quantile_log"
+        self.prep = Prep(mode).fit(X_train, names)
         Z = self.prep.transform(X_train)
         if c["grouping"] == "family":
             if names is None:
