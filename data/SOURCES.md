@@ -33,9 +33,13 @@ Everything here was checked on 2026-11-19. "Verified" means checked by us; "not 
   from ~minute 72 ~118k packets per 8 min, ARP 78-87%, ~290 destinations. One host, 192.168.2.110, sends 88.6% of the
   packets after minute 80 (498,585 ARP packets): the scanner. This is an inference from volume, not a label.
 - 173 timestamp steps go backwards (tiny); the parser keeps file order, which is what a label file would follow.
-- The labelled Mirai Network Attack Dataset (UCI #516, DOI 10.24432/C5D90Q, CC BY 4.0) has a per-packet label file for Mirai,
-  but it is distributed as one 17.7 GB zip. NOT downloaded: this machine fails TLS verification for archive.ics.uci.edu
-  (strict X.509 check) and the check was not bypassed. Status: not verified, not downloaded.
+- The labelled dataset (UCI #516, DOI 10.24432/C5D90Q, CC BY 4.0, Mirsky et al.; nine attack captures with per-packet 0/1 labels) was downloaded on 2026-11-23 into
+  `data/labelled_iot/` (local only, not committed). The download needed the owner's approval to skip the certificate REVOCATION check
+  (`curl --ssl-no-revoke`; the certificate itself was still verified). The zip arrived 18.0 GB of about 18.7 GB: the end of the video-injection files
+  and the zip index were missing, so that capture's pcap is absent (its labels are there). Eight captures were extracted and used: Active Wiretap,
+  ARP MitM, Fuzzing, Mirai, OS Scan, SSDP Flood, SSL Renegotiation, SYN DoS. Checked: packet count equals label count in all eight; the Mirai capture
+  has 764,137 packets like `data/mirai/mirai.pcap`, and its labels start the attack at packet 121,621 = minute 74.3. No checksum is published, so
+  the files are "extracted without error, counts consistent", not hash-verified.
 - UCI states packets are truncated to 200 bytes and labels are 0/1 per packet.
 
 ## netflow/  (optional: NetFlow flow model)

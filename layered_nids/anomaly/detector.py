@@ -184,3 +184,13 @@ class PacketAnomalyDetector:
         det = cls(meta["fpr"], meta["window_s"], **model_kw)
         det.ens, det.threshold, det.mu, det.rho = e, meta["threshold"], meta["mu"], meta["rho"]
         return det
+
+    def score_continual(self, packets, chunk: int = 25_000, **kw):
+        """Score packets in capture order with a model that refits itself when the traffic drifts (anomaly/continual.py).
+        Returns (scores, thresholds in effect per packet, refit log). The saved model is left unchanged."""
+        from .continual import ContinualScorer
+
+        self._need()
+        X = self.features.run(packets)
+        sc = ContinualScorer(self.ens, self.threshold, self.fpr, names=feature_names(regularity=self.regularity), **kw)
+        return sc.run(X, chunk)

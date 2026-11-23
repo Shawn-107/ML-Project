@@ -1,7 +1,7 @@
 """Read packets from a capture file into small records (own parser; scapy is used only to read the file container).
 
 Supported: classic pcap (tested on the Mirai example capture and on files written by our tests) with Ethernet link
-type; IPv4, IPv6, ARP; TCP and UDP ports. pcapng goes through scapy's reader and has NOT been tested here.
+type; IPv4, IPv6, ARP; TCP and UDP ports. pcapng goes through scapy's reader; checked on four labelled pcapng captures (2026-11-23): the packet count equals the label count in each.
 Anything else (other link types, truncated headers) yields a record with the fields it could read and zeros elsewhere,
 so packet numbering stays aligned with any label file.
 """
@@ -143,8 +143,8 @@ def _l4(buf, off, p, ts, wirelen, smac, dmac, src, dst) -> Packet:
     return Packet(ts, wirelen, smac, dmac, src, dst, name, sport, dport, qname, flags, httpreq, sni)
 
 
-def iter_packets(path: str | Path, limit: int | None = None) -> Iterator[Packet]:
-    """Yield Packet records in file order."""
+def iter_packets(path: str | Path, limit: int | None = None, start: int = 0) -> Iterator[Packet]:
+    """Yield Packet records in file order. `start` skips that many packets without parsing them; `limit` counts packets yielded."""
     from scapy.utils import RawPcapNgReader, RawPcapReader
 
     p = Path(path)
@@ -156,7 +156,9 @@ def iter_packets(path: str | Path, limit: int | None = None) -> Iterator[Packet]
     try:
         if not ng and getattr(reader, "linktype", LINKTYPE_ETHERNET) != LINKTYPE_ETHERNET:
             raise ValueError(f"unsupported link type {reader.linktype} (only Ethernet)")
-        for buf, meta in reader:
+        for i, (buf, meta) in enumerate(reader):
+            if i < start:
+                continue
             if ng:
                 res = getattr(meta, "tsresol", 1_000_000) or 1_000_000
                 ts = ((meta.tshigh << 32) | meta.tslow) / res
