@@ -426,7 +426,7 @@
     loaded = {}; LAST_COUNT = -1; status(); route();
   }
   function capRender(st) {
-    var job = st.job || {}, nets = st.networks || [], net = document.getElementById("net"), box = document.getElementById("cap-status"), busy = job.state === "capturing" || job.state === "analysing";
+    var job = st.job || {}, nets = st.networks || [], net = document.getElementById("cap-net"), box = document.getElementById("cap-status"), busy = job.state === "capturing" || job.state === "analysing";
     net.textContent = "";
     net.appendChild(el("div", "notice " + (st.needs_acknowledgement ? "warn" : "info"),
       nets.length ? "Network: " + nets.map(function (n) { return n.name + " (" + n.category + ")"; }).join(", ") + (st.needs_acknowledgement ? " - not marked Private: other people's broadcast traffic may be on the wire, so you must confirm below." : " - marked Private.")
