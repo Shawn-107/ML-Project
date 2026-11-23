@@ -50,8 +50,10 @@ def network_profiles() -> list[dict]:
     return res
 
 
-def _capture_subprocess(path: Path, seconds: float, max_packets: int) -> dict:
+def _capture_subprocess(path: Path, seconds: float, max_packets: int, test_request: bool = False) -> dict:
     cmd = [sys.executable, "-m", "layered_nids.pipeline.live", "--seconds", str(seconds), "--max-packets", str(max_packets), "--out", Path(path).name]
+    if test_request:
+        cmd.append("--test-request")
     try:
         r = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=seconds + APPROVAL_WAIT_S)
     except subprocess.TimeoutExpired:
@@ -88,6 +90,7 @@ class CaptureManager:
         self._job: dict = {"state": "idle"}
         self._net_cache: tuple[float, list] = (0.0, [])
         self.alerts_file, self.events_file = self.state / "live_alerts.jsonl", self.state / "live_events.jsonl"
+        self.history_file = self.state / "live_captures.jsonl"             # one line per finished capture, also when it found nothing
 
     # ------------------------------------------------------------------------------------------------ status
     def _profiles(self) -> list[dict]:
@@ -106,14 +109,25 @@ class CaptureManager:
             job = dict(self._job)
         return {"job": job, "networks": self._profiles(), "needs_acknowledgement": self.needs_acknowledgement(),
                 "limits": {"max_seconds": MAX_SECONDS, "max_packets": MAX_PACKETS, "default_seconds": DEFAULT_SECONDS},
-                "live_alerts": self._count(self.alerts_file), "live_events": self._count(self.events_file)}
+                "live_alerts": self._count(self.alerts_file), "live_events": self._count(self.events_file), "history": self._history()}
+
+    def _history(self, last: int = 10) -> list[dict]:
+        if not self.history_file.exists():
+            return []
+        rows = []
+        for line in self.history_file.read_text(encoding="utf-8").splitlines()[-last:]:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        return rows
 
     @staticmethod
     def _count(p: Path) -> int:
         return sum(1 for _ in p.open(encoding="utf-8")) if p.exists() else 0
 
     # ------------------------------------------------------------------------------------------------ actions
-    def start(self, seconds, max_packets=None, acknowledged: bool = False) -> dict:
+    def start(self, seconds, max_packets=None, acknowledged: bool = False, test_request: bool = False) -> dict:
         try:
             seconds = float(seconds)
             max_packets = int(max_packets if max_packets is not None else MAX_PACKETS)
@@ -128,7 +142,7 @@ class CaptureManager:
         with self._lock:
             if self._job.get("state") in ("capturing", "analysing"):
                 raise RuntimeError("a capture is already running")
-            job = {"id": uuid.uuid4().hex[:12], "state": "capturing", "seconds": seconds, "started": time.time(), "message": "Waiting for the Windows approval, then capturing ..."}
+            job = {"id": uuid.uuid4().hex[:12], "state": "capturing", "seconds": seconds, "started": time.time(), "test_request": bool(test_request), "message": "Waiting for the Windows approval, then capturing ..."}
             self._job = job
             snapshot = dict(job)                                         # taken before the worker can change it
         threading.Thread(target=self._run, args=(snapshot, max_packets), daemon=True).start()
@@ -139,7 +153,7 @@ class CaptureManager:
             if self._job.get("state") in ("capturing", "analysing"):
                 raise RuntimeError("a capture is running")
         removed = 0
-        for p in (self.alerts_file, self.events_file):
+        for p in (self.alerts_file, self.events_file, self.history_file):
             if p.exists():
                 p.unlink()
                 removed += 1
@@ -154,7 +168,7 @@ class CaptureManager:
         from layered_nids.pipeline.live import LIVE_DIR
         path = LIVE_DIR / f"dashboard_{job['id']}.pcap"
         try:
-            info = self._capture(path, job["seconds"], max_packets)
+            info = self._capture(path, job["seconds"], max_packets, job["test_request"]) if job["test_request"] else self._capture(path, job["seconds"], max_packets)
             self._set(state="analysing", message=f"Captured {info['packets']:,} packets. Analysing ...", packets=info["packets"])
             ev = self._analyse(path)
             alerts = _signature_alerts(ev)
@@ -168,6 +182,9 @@ class CaptureManager:
                 for a in alerts:
                     f.write(json.dumps({**a, "source": "live", "capture": job["id"]}, default=float) + "\n")
             sig = sum(1 for e in ev if e.detail.get("signature"))
+            with self.history_file.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"id": job["id"], "finished": time.time(), "packets": info["packets"], "seconds": info["seconds"], "events": len(ev), "alerts": len(alerts),
+                                    "signature_hits": sig, "test_request": job["test_request"]}) + "\n")
             self._set(state="done", finished=time.time(), events=len(ev), alerts=len(alerts), signature_hits=sig, packets=info["packets"], captured_seconds=info["seconds"],
                       message="Done. The capture file was deleted; only the findings were kept.")
         except Exception as e:                                           # a message for the page, never a stack trace

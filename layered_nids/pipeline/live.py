@@ -20,6 +20,7 @@ so a short capture shows the capture path working but cannot produce packet aler
 from __future__ import annotations
 
 import argparse
+import threading
 import time
 from pathlib import Path
 
@@ -70,19 +71,31 @@ def capture_to_pcap(path, seconds: float, max_packets: int, iface: str | None = 
     return {"path": str(out), "packets": seen["n"], "seconds": round(time.time() - t0, 1), "bytes": out.stat().st_size}
 
 
+def _send_test_request() -> None:
+    """One harmless request that looks like a directory traversal (pipeline/live_selftest.py), sent shortly after the capture has started."""
+    time.sleep(1.5)
+    from layered_nids.pipeline.live_selftest import send_planted_request
+    try:
+        print(f"test request sent: HTTP {send_planted_request()['status']}", flush=True)
+    except Exception as e:
+        print(f"test request failed: {type(e).__name__}", flush=True)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Capture your own traffic for a limited time, then (optionally) analyse it.")
     ap.add_argument("--seconds", type=float, default=30.0)
     ap.add_argument("--max-packets", type=int, default=100_000)
     ap.add_argument("--iface", default=None, help="interface name (default: scapy's default)")
     ap.add_argument("--out", default=None, help="file name inside data/live (default: capture_<time>.pcap)")
+    ap.add_argument("--test-request", action="store_true", help="send one harmless directory-traversal-looking request to example.com during the capture (shows that detection works)")
     ap.add_argument("--analyse", action="store_true", help="run the pipeline on the capture afterwards (needs enough packets)")
     a = ap.parse_args(argv)
     out = a.out or time.strftime("capture_%Y%m%d_%H%M%S.pcap")
     path = LIVE_DIR / Path(out).name
     print(f"capturing up to {a.seconds:g} s / {a.max_packets:,} packets into {path}", flush=True)
     print("Windows will ask for approval: click Yes only if you started this command.", flush=True)
-    info = capture_to_pcap(path, a.seconds, a.max_packets, a.iface)
+    on_started = (lambda: threading.Thread(target=_send_test_request, daemon=True).start()) if a.test_request else None
+    info = capture_to_pcap(path, a.seconds, a.max_packets, a.iface, on_started=on_started)
     print(f"captured {info['packets']:,} packets in {info['seconds']} s ({info['bytes'] / 1e6:.2f} MB)", flush=True)
     print(f"the file stays on this PC: delete it when you are done: {info['path']}", flush=True)
     if a.analyse:

@@ -444,7 +444,28 @@
       box.appendChild(el("div", "notice err", job.message));
     }
     box.appendChild(el("p", "hint", "Stored live results: " + st.live_alerts + " alerts, " + st.live_events + " events."));
+    var hb = document.getElementById("cap-hist"); hb.textContent = "";
+    var hist = st.history || [];
+    if (hist.length) {
+      hb.appendChild(el("h2", null, "Recent captures")); var ul = el("ul", "plain");
+      hist.slice().reverse().forEach(function (h) {
+        var d = utc(h.finished);
+        ul.appendChild(el("li", null, d.date + " " + d.time + " UTC: " + h.packets.toLocaleString() + " packets in " + h.seconds + " s, " + (h.events + h.alerts === 0 ? "nothing suspicious found" : h.events + " events, " + h.alerts + " alerts") + (h.test_request ? " (with the test request)" : "")));
+      });
+      hb.appendChild(ul);
+    }
     clearTimeout(capTimer); if (busy) capTimer = setTimeout(capPoll, 1500);
+  }
+  function liveNote() {
+    var box = document.getElementById("live-note"); box.textContent = ""; box.hidden = SRC !== "live";
+    if (SRC !== "live") return;
+    Promise.all([api("/nids/api/summary"), api("/nids/api/capture/status")]).then(function (a) {
+      var s = a[0], st = a[1], h = st.history || [], last = h[h.length - 1], empty = s.alerts + s.events === 0;
+      var t = (empty ? "No findings in your live captures yet. " : "Showing live captures only. ");
+      t += last ? "Last capture: " + last.packets.toLocaleString() + " packets in " + last.seconds + " s, " + (last.events + last.alerts === 0 ? "nothing suspicious found, which is normal for ordinary traffic." : last.events + " events.") : "No capture has been run yet.";
+      if (empty) t += " On the Live capture page you can tick the test request to see a finding appear.";
+      var n = el("div", "notice info", t); box.appendChild(n);
+    }).catch(function () { /* keep the page as it is */ });
   }
   function capPoll() { api("/nids/api/capture/status").then(capRender).catch(function () { /* keep the old status */ }); }
   function capPost(path, body) {
@@ -454,7 +475,7 @@
   function capStart() {
     var box = document.getElementById("cap-status"), s = parseFloat(document.getElementById("cap-s").value);
     if (!(s >= 5 && s <= 120)) { box.textContent = ""; box.appendChild(el("div", "notice warn", "Seconds must be between 5 and 120.")); return; }
-    capPost("/nids/api/capture", { seconds: s, acknowledged: document.getElementById("ack").checked }).then(function (j) {
+    capPost("/nids/api/capture", { seconds: s, acknowledged: document.getElementById("ack").checked, test_request: document.getElementById("cap-test").checked }).then(function (j) {
       if (j.error) { box.textContent = ""; box.appendChild(el("div", "notice " + (j.needs_acknowledgement ? "warn" : "err"), j.error)); return; }
       toast("Capture started: approve the Windows prompt"); capPoll();
     });
@@ -476,6 +497,7 @@
     document.querySelectorAll(".view").forEach(function (s) { s.hidden = s.id !== "v-" + v; });
     document.querySelectorAll("nav.tabs a").forEach(function (a) { a.classList.toggle("on", a.getAttribute("data-v") === v); });
     if (v === "live") capPoll();
+    liveNote();
     if (!loaded[v]) { loaded[v] = true; if (v === "overview") overview(true); if (v === "alerts") alerts(true); if (v === "events") events(true); }
     if (raw.indexOf("host/") !== 0) window.scrollTo(0, 0);
   }

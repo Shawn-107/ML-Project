@@ -25,7 +25,7 @@ def _evidence():
 
 
 def _manager(tmp_path, networks=PRIVATE, capture=None, analyse=None):
-    return CaptureManager(tmp_path, capture=capture or (lambda p, s, n: {"packets": 1234, "seconds": 5.0}), analyse=analyse or (lambda p: _evidence()),
+    return CaptureManager(tmp_path, capture=capture or (lambda p, s, n, t=False: {"packets": 1234, "seconds": 5.0}), analyse=analyse or (lambda p: _evidence()),
                           network=lambda: networks)
 
 
@@ -94,7 +94,7 @@ def test_clear_removes_live_results(tmp_path):
     m.start(10)
     _wait(m)
     assert m.status()["live_events"] == 3 and m.status()["live_alerts"] == 1
-    assert m.clear()["removed_files"] == 2
+    assert m.clear()["removed_files"] == 3                                       # alerts, events and the capture history
     assert m.status()["live_events"] == 0 and m.status()["live_alerts"] == 0
 
 
@@ -164,3 +164,18 @@ def test_api_validation_acknowledgement_run_and_source_filter(web):
     assert _call(base, "/nids/api/stats?source=live", opener=op)[1]["severity"]["high"] == 1
     s, b = _call(base, "/nids/api/capture/clear", b"{}", H, op)
     assert s == 200 and _call(base, "/nids/api/summary?source=live", opener=op)[1]["events"] == 0
+
+
+def test_history_records_every_capture_even_an_empty_one_and_the_test_request_flag(tmp_path):
+    seen = []
+    m = _manager(tmp_path, capture=lambda p, s, n, t=False: seen.append(t) or {"packets": 718, "seconds": 32.4}, analyse=lambda p: [])
+    m.start(10)
+    _wait(m)
+    m.start(10, test_request=True)
+    _wait(m)
+    assert seen == [False, True]                                          # the option reaches the capture step; off by default
+    h = m.status()["history"]
+    assert [(x["packets"], x["events"], x["alerts"], x["test_request"]) for x in h] == [(718, 0, 0, False), (718, 0, 0, True)]
+    assert m.status()["live_events"] == 0 and m.status()["live_alerts"] == 0   # nothing found, and the history still explains it
+    m.clear()
+    assert m.status()["history"] == []

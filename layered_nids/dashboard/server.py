@@ -244,7 +244,7 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, 
                     b = json.loads(self._body(2000))
                     if not isinstance(b, dict):
                         raise ValueError("body must be a JSON object")
-                    return self._json(200, capture.start(b.get("seconds"), b.get("max_packets"), bool(b.get("acknowledged"))))
+                    return self._json(200, capture.start(b.get("seconds"), b.get("max_packets"), bool(b.get("acknowledged")), bool(b.get("test_request"))))
                 except PermissionError as e:
                     return self._json(403, {"error": str(e), "needs_acknowledgement": True})
                 except RuntimeError as e:

@@ -30,6 +30,7 @@
 </header>
 
 <main>
+  <div id="live-note" hidden></div>
   <section class="view" id="v-overview">
     <div class="hero">
       <div><h1>Network <span class="grad">overview</span></h1><p class="sub" id="range">What the detectors found in the loaded data.</p></div>
@@ -91,12 +92,14 @@
     <div class="card">
       <div id="cap-net"></div>
       <label class="check" id="ack-box" hidden><input type="checkbox" id="ack"><span>I understand this network is not marked Private, and I am allowed to capture here.</span></label>
+      <label class="check"><input type="checkbox" id="cap-test"><span>Send one harmless test request during the capture: a fake attack aimed at example.com (a public test domain) that the rules should flag. It lets you see a finding appear. Off by default.</span></label>
       <div class="upload-row">
         <label class="field">Seconds <input type="number" id="cap-s" min="5" max="120" value="20"></label>
         <button class="btn" id="cap-go">Start capture</button>
         <button class="btn ghost" id="cap-clear">Clear live results</button>
       </div>
       <div id="cap-status"></div>
+      <div id="cap-hist"></div>
     </div>
     <div class="card" style="margin-top:16px">
       <div class="card-h"><h2>What this does and does not do</h2></div>
