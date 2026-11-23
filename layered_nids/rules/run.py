@@ -17,7 +17,7 @@ from layered_nids.common.paths import DATA, REPORTS
 from layered_nids.packets.pcap import iter_packets
 from layered_nids.rules.engine import calibrate_rules, run_rules
 
-PCAP = DATA / "mirai" / "mirai_example" / "mirai.pcap"
+PCAP = DATA / "mirai" / "mirai.pcap"
 TRAIN_MIN, PROXY_MIN = 52.0, 80.0
 
 

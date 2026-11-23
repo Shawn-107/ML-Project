@@ -26,7 +26,7 @@ from layered_nids.packets.detector import PacketDetector
 from layered_nids.packets.extractor import FeatureExtractor
 from layered_nids.packets.pcap import iter_packets
 
-PCAP = DATA / "mirai" / "mirai_example" / "mirai.pcap"
+PCAP = DATA / "mirai" / "mirai.pcap"
 CACHE = DATA / "mirai" / "cache"
 TRAIN_MIN = 52.0          # published method, Table III: Mirai train phase
 ATTACK_PROXY_MIN = 80.0   # from the traffic profile, NOT from labels
