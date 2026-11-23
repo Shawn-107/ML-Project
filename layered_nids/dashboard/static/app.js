@@ -15,7 +15,9 @@
     if (text != null) e.textContent = text;
     return e;
   }
+  var SRC = "recorded"; try { if (localStorage.getItem("nids-src") === "live") SRC = "live"; } catch (e) { /* storage may be blocked */ }
   function api(path) {
+    if (SRC === "live" && path.indexOf("/nids/api/") === 0 && path.indexOf("/nids/api/capture") !== 0) path += (path.indexOf("?") < 0 ? "?" : "&") + "source=live";
     return fetch(path, { credentials: "same-origin" }).then(function (r) {
       if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
       return r.json();
@@ -336,7 +338,7 @@
   var PITEMS = [], PSEL = 0;
   function actions() {
     var a = [["▦", "Overview", "page", function () { location.hash = "#/overview"; }], ["⚠", "Alerts", "page", function () { location.hash = "#/alerts"; }],
-             ["☰", "Rule events", "page", function () { location.hash = "#/events"; }], ["↑", "Upload a flow file", "page", function () { location.hash = "#/upload"; }],
+             ["☰", "Rule events", "page", function () { location.hash = "#/events"; }], ["↑", "Upload a flow file", "page", function () { location.hash = "#/upload"; }], ["◉", "Live capture", "page", function () { location.hash = "#/live"; }],
              ["↗", "Flow analysis app", "page", function () { location.href = "/app/"; }], ["◐", "Toggle light / dark theme", "command", toggleTheme],
              ["●", "Turn live refresh on or off", "command", toggleLive], ["⇥", "Sign out", "command", signOut]];
     if (STATS) STATS.top_hosts.forEach(function (h) { a.push(["◎", "Host " + h.host, h.alerts + " alerts", function () { openHost(h.host); }]); });
@@ -415,9 +417,56 @@
       .then(function () { go.disabled = false; });
   }
 
+  // ------------------------------------------------------------------------------------------------ live capture
+  var capTimer = null;
+  function capHeaders() { return { "X-NIDS-Capture": "1", "Content-Type": "application/json" }; }
+  function setSrc(v) {
+    SRC = v; try { localStorage.setItem("nids-src", v); } catch (e) { /* ignore */ }
+    var b = document.getElementById("src"); b.textContent = "Data: " + (v === "live" ? "Live captures" : "Recorded"); b.classList.toggle("src-live", v === "live");
+    loaded = {}; LAST_COUNT = -1; status(); route();
+  }
+  function capRender(st) {
+    var job = st.job || {}, nets = st.networks || [], net = document.getElementById("net"), box = document.getElementById("cap-status"), busy = job.state === "capturing" || job.state === "analysing";
+    net.textContent = "";
+    net.appendChild(el("div", "notice " + (st.needs_acknowledgement ? "warn" : "info"),
+      nets.length ? "Network: " + nets.map(function (n) { return n.name + " (" + n.category + ")"; }).join(", ") + (st.needs_acknowledgement ? " - not marked Private: other people's broadcast traffic may be on the wire, so you must confirm below." : " - marked Private.")
+                  : "The network type could not be checked, so you must confirm below."));
+    document.getElementById("ack-box").hidden = !st.needs_acknowledgement;
+    document.getElementById("cap-go").disabled = busy;
+    box.textContent = "";
+    if (busy) {
+      box.appendChild(el("div", "notice info", job.message + " (" + Math.max(0, Math.round(Date.now() / 1000 - job.started)) + " s since start)"));
+    } else if (job.state === "done") {
+      var tiles = el("div", "tiles"); tile(tiles, job.packets, "packets captured"); tile(tiles, job.events, "rule events"); tile(tiles, job.alerts, "alerts"); tile(tiles, job.signature_hits, "signature hits");
+      box.appendChild(tiles); box.appendChild(el("div", "notice info", job.message));
+      var row = el("div", "upload-row"), go = el("button", "btn", "Show live results"); go.addEventListener("click", function () { setSrc("live"); location.hash = "#/overview"; }); row.appendChild(go); box.appendChild(row);
+    } else if (job.state === "failed") {
+      box.appendChild(el("div", "notice err", job.message));
+    }
+    box.appendChild(el("p", "hint", "Stored live results: " + st.live_alerts + " alerts, " + st.live_events + " events."));
+    clearTimeout(capTimer); if (busy) capTimer = setTimeout(capPoll, 1500);
+  }
+  function capPoll() { api("/nids/api/capture/status").then(capRender).catch(function () { /* keep the old status */ }); }
+  function capPost(path, body) {
+    return fetch(path, { method: "POST", credentials: "same-origin", headers: capHeaders(), body: JSON.stringify(body || {}) })
+      .then(function (r) { return r.json().catch(function () { return { error: "server answered " + r.status }; }).then(function (j) { j.status = r.status; return j; }); });
+  }
+  function capStart() {
+    var box = document.getElementById("cap-status"), s = parseFloat(document.getElementById("cap-s").value);
+    if (!(s >= 5 && s <= 120)) { box.textContent = ""; box.appendChild(el("div", "notice warn", "Seconds must be between 5 and 120.")); return; }
+    capPost("/nids/api/capture", { seconds: s, acknowledged: document.getElementById("ack").checked }).then(function (j) {
+      if (j.error) { box.textContent = ""; box.appendChild(el("div", "notice " + (j.needs_acknowledgement ? "warn" : "err"), j.error)); return; }
+      toast("Capture started: approve the Windows prompt"); capPoll();
+    });
+  }
+  function capClear() {
+    if (!confirm("Delete all stored live-capture alerts and events?")) return;
+    capPost("/nids/api/capture/clear").then(function (j) { toast(j.error ? j.error : "Live results cleared"); loaded = {}; LAST_COUNT = -1; capPoll(); status(); });
+  }
+
   // ------------------------------------------------------------------------------------------------ routing and wiring
   var loaded = {};
-  function currentView() { var v = location.hash.replace(/^#\//, "") || "overview"; if (v === "search") v = "overview"; return ["overview", "alerts", "events", "upload"].indexOf(v) < 0 ? "overview" : v; }
+  function currentView() { var v = location.hash.replace(/^#\//, "") || "overview"; if (v === "search") v = "overview"; return ["overview", "alerts", "events", "upload", "live"].indexOf(v) < 0 ? "overview" : v; }
   function status() { api("/nids/api/summary").then(function (s) { LAST_COUNT = s.alerts + s.events; }); }
   function route() {
     var raw = location.hash.replace(/^#\//, "") || "overview";
@@ -426,6 +475,7 @@
     var v = currentView();
     document.querySelectorAll(".view").forEach(function (s) { s.hidden = s.id !== "v-" + v; });
     document.querySelectorAll("nav.tabs a").forEach(function (a) { a.classList.toggle("on", a.getAttribute("data-v") === v); });
+    if (v === "live") capPoll();
     if (!loaded[v]) { loaded[v] = true; if (v === "overview") overview(true); if (v === "alerts") alerts(true); if (v === "events") events(true); }
     if (raw.indexOf("host/") !== 0) window.scrollTo(0, 0);
   }
@@ -441,6 +491,10 @@
   document.getElementById("amore").addEventListener("click", function () { aLimit += 300; alerts(false); });
   document.getElementById("emore").addEventListener("click", function () { eLimit += 300; events(false); });
   document.getElementById("go").addEventListener("click", upload);
+  document.getElementById("cap-go").addEventListener("click", capStart);
+  document.getElementById("cap-clear").addEventListener("click", capClear);
+  document.getElementById("src").addEventListener("click", function () { setSrc(SRC === "live" ? "recorded" : "live"); toast(SRC === "live" ? "Showing live captures" : "Showing recorded data"); });
+  (function () { var b = document.getElementById("src"); b.textContent = "Data: " + (SRC === "live" ? "Live captures" : "Recorded"); b.classList.toggle("src-live", SRC === "live"); })();
   var drop = document.getElementById("drop"), file = document.getElementById("file");
   function picked() { var f = file.files[0]; document.getElementById("drop-t").textContent = f ? f.name : "Drop a file here or click to choose"; document.getElementById("drop-s").textContent = f ? (f.size / 1048576).toFixed(2) + " MB" : ".csv, .tsv, .binetflow"; }
   file.addEventListener("change", picked);

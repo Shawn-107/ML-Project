@@ -1,6 +1,6 @@
 """Live self-test: does the capture -> detection chain work on REAL traffic?
 
-NOT TO BE RUN unless the owner asks: the owner decided on 2026-11-21 that the project is tested on datasets (pcap and CSV files), not on live captures.
+Run only when the owner asks (it was run once on 2026-11-23: 218 packets captured, parsed, and the planted request flagged by the rules layer).
 
   python -m layered_nids.pipeline.live_selftest [--seconds 20] [--keep]
 

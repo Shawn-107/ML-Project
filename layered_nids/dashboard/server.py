@@ -5,7 +5,8 @@
 
 Pages:   /            host alerts and rule events from the pipeline, CSV upload
          /app/        the flow-analysis app of the owner's earlier project (React, built files), served by /api/*
-API:     /nids/api/summary | alerts | events | upload | download      (this dashboard)
+API:     /nids/api/summary | stats | host | alerts | events | upload | download      (this dashboard; add source=live for live captures)
+         /nids/api/capture/status | capture | capture/clear      (live capture, localhost only; see dashboard/live_capture.py)
          /api/info | evaluation | sample | score | explain | adapt | recalibrate   (flow model; same contract as the earlier app)
 
 Security: binds to 127.0.0.1 only (refuses anything else); every page and API call needs a signed-in session (HttpOnly,
@@ -49,9 +50,12 @@ class Data:
 
     def _read(self, pattern: str, extra: list[Path]) -> list[dict]:
         files = sorted(self.dir.glob(pattern)) + [p for p in extra if p.exists()]
+        return self._read_files(pattern, files)
+
+    def _read_files(self, name: str, files: list[Path]) -> list[dict]:
         key = tuple((str(p), p.stat().st_mtime_ns) for p in files)
-        if self._cache.get(pattern, (None,))[0] == key:
-            return self._cache[pattern][1]
+        if self._cache.get(name, (None,))[0] == key:
+            return self._cache[name][1]
         rows = []
         for p in files:
             for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -61,13 +65,17 @@ class Data:
                         rows.append(r)
                 except json.JSONDecodeError:
                     pass
-        self._cache[pattern] = (key, rows)
+        self._cache[name] = (key, rows)
         return rows
 
-    def alerts(self) -> list[dict]:
+    def alerts(self, source: str = "recorded") -> list[dict]:
+        if source == "live":
+            return self._read_files("live_alerts", [p for p in [self.state / "live_alerts.jsonl"] if p.exists()])
         return self._read("*.alerts.jsonl", [])
 
-    def events(self) -> list[dict]:
+    def events(self, source: str = "recorded") -> list[dict]:
+        if source == "live":
+            return self._read_files("live_events", [p for p in [self.state / "live_events.jsonl"] if p.exists()])
         return self._read("*.events.jsonl", [self.state / "upload_events.jsonl"])
 
 
@@ -118,7 +126,7 @@ def _stats(alerts: list, events: list, bins: int = 48) -> dict:
             "severity": {k: sum(1 for r in alerts if r.get("severity") == k) for k in ("critical", "high", "medium", "low")}}
 
 
-def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
+def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, capture):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         timeout = 60
@@ -224,29 +232,48 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
 
         # -------------------------------------------------------------------------------------------- dashboard API
         def _nids(self, method, name, q):
+            src = "live" if q.get("source", [""])[0] == "live" else "recorded"
+            if name == "capture/status" and method == "GET":
+                return self._json(200, capture.status())
+            if name in ("capture", "capture/clear") and method == "POST":
+                if self.headers.get("X-NIDS-Capture") != "1":
+                    return self._json(403, {"error": "missing capture header"})
+                try:
+                    if name == "capture/clear":
+                        return self._json(200, capture.clear())
+                    b = json.loads(self._body(2000))
+                    if not isinstance(b, dict):
+                        raise ValueError("body must be a JSON object")
+                    return self._json(200, capture.start(b.get("seconds"), b.get("max_packets"), bool(b.get("acknowledged"))))
+                except PermissionError as e:
+                    return self._json(403, {"error": str(e), "needs_acknowledgement": True})
+                except RuntimeError as e:
+                    return self._json(409, {"error": str(e)})
+                except (ValueError, json.JSONDecodeError) as e:
+                    return self._json(400, {"error": str(e)})
             if name == "summary" and method == "GET":
-                a, e = data.alerts(), data.events()
+                a, e = data.alerts(src), data.events(src)
                 sev = {}
                 for r in a:
                     sev[r.get("severity", "low")] = sev.get(r.get("severity", "low"), 0) + 1
                 return self._json(200, {"alerts": len(a), "alert_hosts": len({r.get("host") for r in a}), "severity": sev, "events": len(e),
                                         "signature_events": sum(1 for r in e if (r.get("detail") or {}).get("signature")), "event_hosts": len({r.get("host") for r in e})})
             if name == "stats" and method == "GET":
-                return self._json(200, _stats(data.alerts(), data.events()))
+                return self._json(200, _stats(data.alerts(src), data.events(src)))
             if name == "host" and method == "GET":
                 h = q.get("host", [""])[0]
-                a = sorted((r for r in data.alerts() if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
-                e = sorted((r for r in data.events() if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
+                a = sorted((r for r in data.alerts(src) if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
+                e = sorted((r for r in data.events(src) if r.get("host") == h), key=lambda r: float(r.get("ts", 0)))
                 return self._json(200, {"host": h, "alerts": a[-200:], "events": e[-200:], "alert_total": len(a), "event_total": len(e)})
             if name == "alerts" and method == "GET":
-                rows = _filter(data.alerts(), q)
+                rows = _filter(data.alerts(src), q)
                 sev = q.get("severity", [""])[0]
                 if sev:
                     rows = [r for r in rows if r.get("severity") == sev]
                 rows.sort(key=lambda r: (-float(r.get("ts", 0)), -SEVERITY_ORDER.get(r.get("severity", "low"), 0)))
                 return self._json(200, {"total": len(rows), "rows": rows[:int(q.get("limit", ["500"])[0])]})
             if name == "events" and method == "GET":
-                rows = _filter(data.events(), q)
+                rows = _filter(data.events(src), q)
                 kind = q.get("kind", [""])[0]
                 if kind in ("signature", "heuristic"):
                     rows = [r for r in rows if bool((r.get("detail") or {}).get("signature")) == (kind == "signature")]
@@ -316,7 +343,7 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service):
     return Handler
 
 
-def make_server(host: str, port: int, data_dir: Path, state: Path = STATE) -> ThreadingHTTPServer:
+def make_server(host: str, port: int, data_dir: Path, state: Path = STATE, capture=None) -> ThreadingHTTPServer:
     if host not in LOOPBACK:
         raise SystemExit(f"refusing to listen on {host!r}: the dashboard is for this computer only (use 127.0.0.1)")
     state = Path(state)
@@ -342,7 +369,10 @@ def make_server(host: str, port: int, data_dir: Path, state: Path = STATE) -> Th
                 holder["svc"] = Service(Detector(load_bundle()), pool, HERE / "data" / "final_evaluation.json")
             return holder["svc"]
 
-    handler = make_handler(Data(data_dir, state), Sessions(users), state, flow_service)
+    if capture is None:
+        from layered_nids.dashboard.live_capture import CaptureManager
+        capture = CaptureManager(state)
+    handler = make_handler(Data(data_dir, state), Sessions(users), state, flow_service, capture)
     return ThreadingHTTPServer((host, port), handler)
 
 

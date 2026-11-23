@@ -18,10 +18,12 @@
     <a href="#/alerts" data-v="alerts">Alerts</a>
     <a href="#/events" data-v="events">Events</a>
     <a href="#/upload" data-v="upload">Upload</a>
+    <a href="#/live" data-v="live">Live capture</a>
   </nav>
   <span class="spacer"></span>
   <button class="hbtn hide-m" id="kbtn" title="Search and commands">Search <kbd>Ctrl K</kbd></button>
   <button class="hbtn live on" id="live" title="Refresh automatically when the data changes"><span class="pulse"></span><span id="live-t">Live</span></button>
+  <button class="hbtn" id="src" title="Which data the Overview, Alerts and Events pages show">Data: Recorded</button>
   <a class="hbtn hide-s" href="/app/">Flow analysis &#8599;</a>
   <button class="hbtn" id="theme" title="Switch light or dark">Theme</button>
   <button class="hbtn" id="out">Sign out</button>
@@ -80,6 +82,31 @@
         <button class="btn" id="go">Analyse</button>
       </div>
       <div id="result"></div>
+    </div>
+  </section>
+
+  <section class="view" id="v-live" hidden>
+    <h1>Live capture</h1>
+    <p class="sub">Capture this computer's own network traffic for a short time and check it with the signature and heuristic rules. The findings appear under <b>Data: Live</b>.</p>
+    <div class="card">
+      <div id="net"></div>
+      <label class="check" id="ack-box" hidden><input type="checkbox" id="ack"><span>I understand this network is not marked Private, and I am allowed to capture here.</span></label>
+      <div class="upload-row">
+        <label class="field">Seconds <input type="number" id="cap-s" min="5" max="120" value="20"></label>
+        <button class="btn" id="cap-go">Start capture</button>
+        <button class="btn ghost" id="cap-clear">Clear live results</button>
+      </div>
+      <div id="cap-status"></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-h"><h2>What this does and does not do</h2></div>
+      <ul class="plain">
+        <li>Windows shows an approval prompt for every capture. Nothing is captured until you click Yes.</li>
+        <li>Up to 120 seconds and 200,000 packets. The capture file is deleted right after the check; only the findings are kept.</li>
+        <li>Only the rules layer runs: known attack patterns and behaviour rules. The packet anomaly model needs about 70,000 clean packets of the same network to learn, so a short capture cannot feed it.</li>
+        <li>Only your own computer's traffic and what reaches it. Do not use it on networks where you have no right to record.</li>
+        <li>Nothing leaves this computer.</li>
+      </ul>
     </div>
   </section>
 </main>

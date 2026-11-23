@@ -252,3 +252,11 @@ td.why{max-width:520px}
   .toolbar .seg{overflow-x:auto;max-width:100%}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0!important}}
+
+/* live capture view */
+.check{display:flex;gap:10px;align-items:flex-start;margin-top:12px;color:var(--text)}
+.check input{margin-top:3px}
+.field{display:flex;gap:8px;align-items:center;color:var(--muted)}
+.field input{width:84px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--text);font:inherit}
+ul.plain{margin:0;padding-left:20px;color:var(--muted);line-height:1.7}
+.hbtn.src-live{border-color:var(--accent);color:var(--accent)}

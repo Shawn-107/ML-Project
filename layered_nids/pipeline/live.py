@@ -2,7 +2,8 @@
 path as a replayed file ("capture, then analyse"; the detector can also score one packet at a time, so true streaming can be added
 later without changing the layers).
 
-NOT USED in this project: the owner decided on 2026-11-21 that testing is done on datasets (pcap and CSV files), not on live captures.
+Used only when the owner asks: the project's tests run on datasets (pcap and CSV files). On 2026-11-23 the owner asked for a live test and for a
+capture button in the dashboard (dashboard/live_capture.py runs this module in a separate process; rules layer only).
 
   python -m layered_nids.pipeline.live --seconds 60 --max-packets 200000          # needs Npcap; Windows asks for approval (UAC)
 
