@@ -11,6 +11,7 @@ validation packets):
 Run:  python -m layered_nids.anomaly.labelled_exp extract     (features cached under data/labelled_iot/features; a few minutes)
       python -m layered_nids.anomaly.labelled_exp run         (writes reports/anomaly/labelled_exp.json)
       python -m layered_nids.anomaly.labelled_exp drift       (fixed versus continual model; writes reports/anomaly/labelled_drift.json)
+      python -m layered_nids.anomaly.labelled_exp confirmed   (confirmed-clean recalibration; writes reports/anomaly/labelled_confirmed.json)
 Data folder: data/labelled_iot/ (see data/SOURCES.md). Local data; never committed.
 """
 from __future__ import annotations
@@ -214,6 +215,54 @@ def drift(seed: int = 0) -> dict:
     return out
 
 
+def _confirmed_one(args) -> dict:
+    """Same starting model and stream as drift(); the model refits only on rows confirmed clean. The confirmation is SIMULATED with the labels
+    (an operator who is always right = an upper bound), and a second run where 2% of the attack packets are wrongly confirmed clean."""
+    name, seed = args
+    import torch
+    from sklearn.metrics import roc_auc_score
+
+    from layered_nids.anomaly.continual import ConfirmedRecalibrator
+    from layered_nids.anomaly.features import feature_names
+    from layered_nids.anomaly.model import AnomalyEnsemble
+
+    warnings.filterwarnings("ignore")
+    torch.set_num_threads(3)
+    names = feature_names()
+    X, y, nb = _load(name)
+    i1, i2, i3 = int(0.5 * nb), int(0.6 * nb), int(0.7 * nb)
+    ens = AnomalyEnsemble(seed=seed).fit(X[:i1], X[i1:i2], names=names)
+    thr = threshold_at_fpr(ens.score(X[i2:i3]), FA)
+    Xs, ys = X[i3:], y[i3:]
+    pre = np.arange(len(ys)) < nb - i3
+    rng = np.random.default_rng(seed)
+    row = {}
+    for label, clean in (("confirmed", ys == 0), ("confirmed_2pct_attack_leak", (ys == 0) | ((ys == 1) & (rng.random(len(ys)) < 0.02)))):
+        sc = ConfirmedRecalibrator(AnomalyEnsemble(**ens.cfg).fit(X[:i1], X[i1:i2], names=names), thr, FA, names=names)
+        s, t, log = sc.run(Xs, clean)
+        f = s >= t
+        row[label] = {"false_alarm_before_attack": float(f[pre & (ys == 0)].mean()), "false_alarm_during_attack": float(f[~pre & (ys == 0)].mean()) if (~pre & (ys == 0)).any() else None,
+                      "recall": float(f[ys == 1].mean()), "refits": int(sum(e["refit"] for e in log)),
+                      "auc_during_attack": float(roc_auc_score(ys[~pre], s[~pre])) if len(np.unique(ys[~pre])) == 2 else None}
+    return {"name": name, **row}
+
+
+def confirmed(seed: int = 0, workers: int = 4) -> dict:
+    """Fixed vs score-only continual (from labelled_drift.json) vs confirmed-clean recalibration, all 8 captures, in parallel."""
+    out = {}
+    with ProcessPoolExecutor(workers) as ex:
+        for r in ex.map(_confirmed_one, [(n, seed) for n in ATTACKS]):
+            out[r.pop("name")] = r
+            n = list(out)[-1]
+            print(n, {k: (round(v["false_alarm_before_attack"], 3), round(v["recall"], 2), v["refits"], None if v["auc_during_attack"] is None else round(v["auc_during_attack"], 2)) for k, v in out[n].items()}, flush=True)
+    (REPORTS / "anomaly").mkdir(parents=True, exist_ok=True)
+    (REPORTS / "anomaly" / "labelled_confirmed.json").write_text(json.dumps(out, indent=1))
+    for label in ("confirmed", "confirmed_2pct_attack_leak"):
+        v = lambda k: np.mean([out[a][label][k] for a in ATTACKS if out[a][label][k] is not None])
+        print(f"  {label:28s} mean over 8: false alarms before attack {100 * v('false_alarm_before_attack'):5.1f}%, during attack {100 * v('false_alarm_during_attack'):5.1f}%, recall {100 * v('recall'):5.1f}%")
+    return out
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
-    {"extract": extract, "run": run, "drift": drift}[cmd]()
+    {"extract": extract, "run": run, "drift": drift, "confirmed": confirmed}[cmd]()
