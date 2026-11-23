@@ -27,10 +27,11 @@
   function utc(ts) { var d = new Date(ts * 1000); return { date: d.getUTCFullYear() + "-" + two(d.getUTCMonth() + 1) + "-" + two(d.getUTCDate()), time: two(d.getUTCHours()) + ":" + two(d.getUTCMinutes()) + ":" + two(d.getUTCSeconds()) }; }
   function clock(ts) { return utc(ts).time.slice(0, 5); }
   function nines(p) { return p >= 1 ? 12 : Math.min(12, Math.max(0, -Math.log10(Math.max(1 - p, 1e-12)))); }
+  function confText(p) { return p >= 0.9999 ? ">99.99%" : p >= 0.99 ? (100 * p).toFixed(2) + "%" : (100 * p).toFixed(1) + "%"; }
   function confidence(p) {
     var n = nines(p), box = el("div", "meter"), t = el("div", "t"), i = el("i");
     i.style.width = Math.round(100 * Math.min(1, n / 12)) + "%"; t.appendChild(i); box.appendChild(t);
-    box.appendChild(el("span", null, p >= 0.999 ? Math.floor(n) + " nines" : (100 * p).toFixed(1) + "%"));
+    box.appendChild(el("span", null, confText(p)));
     box.title = "probability " + p;
     return box;
   }
@@ -40,6 +41,11 @@
   function thead(tab, cols) { tab.textContent = ""; var tr = el("tr"); cols.forEach(function (c) { tr.appendChild(el("th", null, c)); }); var h = el("thead"); h.appendChild(tr); tab.appendChild(h); var b = el("tbody"); tab.appendChild(b); return b; }
   function td(content, cls) { var c = el("td", cls); if (content instanceof Node) c.appendChild(content); else c.textContent = content; return c; }
   function whenCell(ts) { var u = utc(ts), c = el("td", "when"); c.appendChild(el("b", null, u.time)); c.appendChild(document.createTextNode(u.date)); return c; }
+  function failed(e, tab) {
+    if (e && e.message === "signed out") return;
+    if (tab) { var b = thead(tab, ["", "", "", "", "", ""]), tr = el("tr"), c = td(empty("Could not load the data", "Reload the page. If it keeps happening, check that the dashboard is still running.")); c.colSpan = 6; tr.appendChild(c); b.appendChild(tr); }
+    toast("Could not load the data");
+  }
   var timer = null;
   function later(fn) { clearTimeout(timer); timer = setTimeout(fn, 250); }
   function segValue(id, attr) { var on = document.querySelector("#" + id + " button.on"); return on ? on.getAttribute(attr) : ""; }
@@ -82,8 +88,8 @@
       statusText(SUMMARY);
       var rng = document.getElementById("range");
       rng.textContent = STATS.t1 > 0 ? "Data from " + utc(STATS.t0).date + " " + clock(STATS.t0) + " to " + utc(STATS.t1).date + " " + clock(STATS.t1) + " UTC" : "No data loaded yet.";
-      gauge(STATS); kpis(SUMMARY, STATS); timeChart(STATS); donut(STATS); hostMap(STATS); hostBars(STATS); layerBars(STATS); ruleBars(STATS); latest(r[2]);
-    });
+      kpis(SUMMARY, STATS); timeChart(STATS); donut(STATS); hostMap(STATS); hostBars(STATS); layerBars(STATS); ruleBars(STATS); latest(r[2]);
+    }).catch(function (e) { failed(e); });
   }
   function statusText(s) { LAST_COUNT = s.alerts + s.events; }
   var LAST_COUNT = -1;
@@ -113,19 +119,6 @@
       c.appendChild(el("div", "l", x[0])); c.appendChild(el("div", "s", x[2])); c.appendChild(spark(x[4], x[3]));
       box.appendChild(c);
     });
-  }
-  function gauge(st) {
-    var box = document.getElementById("gauge"); box.textContent = "";
-    var tot = st.hist.map(function (b) { return b.critical + b.high + b.medium + b.low; }), peak = Math.max.apply(null, tot) || 0, last = tot.length ? tot[tot.length - 1] : 0;
-    var f = peak ? last / peak : 0;
-    var s = svg("svg", { viewBox: "0 0 120 74", role: "img", "aria-label": "latest alert activity compared with the peak" });
-    var arc = function (a0, a1) { var r = 50, cx = 60, cy = 62, p = function (a) { return [cx + r * Math.cos(Math.PI * (1 - a)), cy - r * Math.sin(Math.PI * (1 - a))]; }, A = p(a0), B = p(a1); return "M" + A[0] + " " + A[1] + " A" + r + " " + r + " 0 0 1 " + B[0] + " " + B[1]; };
-    s.appendChild(svg("path", { d: arc(0, 1), fill: "none", stroke: "var(--line-strong)", "stroke-width": 9, "stroke-linecap": "round" }));
-    var col = f > 0.66 ? "var(--critical)" : f > 0.33 ? "var(--medium)" : "var(--ok)";
-    if (f > 0.01) { var p = svg("path", { d: arc(0, Math.max(f, 0.02)), fill: "none", stroke: col, "stroke-width": 9, "stroke-linecap": "round" }); if (!REDUCED) { p.style.setProperty("--len", "180"); p.classList.add("draw"); } s.appendChild(p); }
-    box.appendChild(s);
-    var t = el("div"); t.appendChild(el("b", null, Math.round(100 * f) + "%")); t.appendChild(el("span", null, "latest window vs peak")); t.appendChild(el("span", null, last + " alert" + (last === 1 ? "" : "s") + " now, peak " + peak));
-    box.appendChild(t);
   }
   function timeChart(st) {
     var box = document.getElementById("ch-time"); box.textContent = "";
@@ -242,7 +235,7 @@
   function rowKey(r) { return r.host + "|" + r.ts + "|" + (r.reasons ? r.reasons[0] : r.reason); }
   function alertRows(tab, rows, seen) {
     var b = thead(tab, ["Severity", "When (UTC)", "Host", "Confidence", "Evidence", "Why"]);
-    if (!rows.length) { var tr = el("tr"), c = td(empty("No alerts", "Run the pipeline and start the dashboard with --data pointing at its output folder.")); c.colSpan = 6; tr.appendChild(c); b.appendChild(tr); return; }
+    if (!rows.length) { var tr = el("tr"), c = td(empty("No alerts", SRC === "live" ? "Alerts from live captures appear here." : "Alerts appear here when the detection layers find a threat.")); c.colSpan = 6; tr.appendChild(c); b.appendChild(tr); return; }
     rows.forEach(function (a) {
       var tr = el("tr"); tr.tabIndex = 0;
       if (seen && seen.size && !seen.has(rowKey(a))) tr.className = "fresh";
@@ -265,7 +258,7 @@
       SEEN_A = new Set(r.rows.map(rowKey));
       document.getElementById("acount").textContent = r.total + " alert" + (r.total === 1 ? "" : "s");
       document.getElementById("amore").hidden = r.rows.length >= r.total;
-    });
+    }).catch(function (e) { failed(e, document.getElementById("atab")); });
   }
 
   // ------------------------------------------------------------------------------------------------ events
@@ -294,10 +287,11 @@
       SEEN_E = new Set(r.rows.map(rowKey));
       document.getElementById("ecount").textContent = r.total + " event" + (r.total === 1 ? "" : "s");
       document.getElementById("emore").hidden = r.rows.length >= r.total;
-    });
+    }).catch(function (e) { failed(e, document.getElementById("etab")); });
   }
 
   // ------------------------------------------------------------------------------------------------ host drawer
+  var lastFocus = null;
   function openHost(host) {
     api("/nids/api/host?host=" + encodeURIComponent(host)).then(function (r) {
       document.getElementById("d-title").textContent = host;
@@ -317,7 +311,7 @@
         var x = el("div", "x");
         if (it.kind === "alert") {
           li.style.setProperty("--dc", SEV_COLOR[it.a.severity] || "var(--low)");
-          x.appendChild(pill(it.a.severity)); x.appendChild(document.createTextNode(" alert, " + Math.floor(nines(Number(it.a.probability))) + " nines"));
+          x.appendChild(pill(it.a.severity)); x.appendChild(document.createTextNode(" alert, confidence " + confText(Number(it.a.probability))));
           var rs = el("div", "reasons"); (it.a.reasons || []).forEach(function (t) { rs.appendChild(el("div", null, t)); }); x.appendChild(rs); x.appendChild(layerBar(it.a.layers));
         } else {
           var d = it.e.detail || {}; li.style.setProperty("--dc", d.signature ? "var(--critical)" : "var(--medium)");
@@ -327,11 +321,13 @@
       });
       body.appendChild(ul);
       var dr = document.getElementById("drawer"); dr.classList.add("on"); dr.setAttribute("aria-hidden", "false"); document.getElementById("scrim").classList.add("on");
-    });
+      lastFocus = document.activeElement; document.getElementById("d-close").focus();
+    }).catch(function (e) { failed(e); });
   }
   function closeAll() {
     var dr = document.getElementById("drawer"); dr.classList.remove("on"); dr.setAttribute("aria-hidden", "true");
     document.getElementById("scrim").classList.remove("on"); closePalette();
+    if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) { /* element gone */ } lastFocus = null; }
   }
 
   // ------------------------------------------------------------------------------------------------ command palette
@@ -496,6 +492,7 @@
     var v = currentView();
     document.querySelectorAll(".view").forEach(function (s) { s.hidden = s.id !== "v-" + v; });
     document.querySelectorAll("nav.tabs a").forEach(function (a) { a.classList.toggle("on", a.getAttribute("data-v") === v); });
+    document.title = ({ overview: "Overview", alerts: "Alerts", events: "Rule events", upload: "Upload", live: "Live capture" }[v]) + " - NIDS";
     if (v === "live") capPoll();
     liveNote();
     if (!loaded[v]) { loaded[v] = true; if (v === "overview") overview(true); if (v === "alerts") alerts(true); if (v === "events") events(true); }

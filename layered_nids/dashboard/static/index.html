@@ -4,10 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NIDS</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#070a14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.500-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<noscript><p class="noscript">This dashboard needs JavaScript.</p></noscript>
 <header>
   <div class="brand">
     <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
@@ -34,7 +37,6 @@
   <section class="view" id="v-overview">
     <div class="hero">
       <div><h1>Network <span class="grad">overview</span></h1><p class="sub" id="range">What the detectors found in the loaded data.</p></div>
-      <div class="gauge" id="gauge"></div>
     </div>
     <div class="kpis" id="kpis"></div>
     <div class="grid">
@@ -42,7 +44,7 @@
       <div class="card span-4 rise" style="--i:5"><div class="card-h"><h2>Severity</h2></div><div id="ch-sev" class="donut-wrap"></div></div>
       <div class="card span-6 rise" style="--i:6"><div class="card-h"><h2>Host map</h2><span class="hint">size = alerts &middot; colour = worst severity &middot; click a host</span></div><div id="ch-map"></div></div>
       <div class="card span-6 rise" style="--i:7"><div class="card-h"><h2>Busiest hosts</h2><span class="hint">alerts &middot; rule events</span></div><div id="ch-hosts" class="bars"></div></div>
-      <div class="card span-6 rise" style="--i:8"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of all alert weight</span></div><div id="ch-layers" class="bars"></div></div>
+      <div class="card span-6 rise" style="--i:8"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of alert evidence</span></div><div id="ch-layers" class="bars"></div></div>
       <div class="card span-6 rise" style="--i:9"><div class="card-h"><h2>Rule events by rule</h2><span class="hint">red = signature &middot; amber = heuristic</span></div><div id="ch-rules" class="bars"></div></div>
       <div class="card span-12 rise" style="--i:10;padding:0"><div class="card-h" style="padding:16px 20px 0"><h2>Latest alerts</h2><a href="#/alerts">View all</a></div><div class="table-wrap" style="max-height:none"><table id="t-latest"></table></div></div>
     </div>

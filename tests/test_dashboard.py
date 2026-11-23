@@ -159,3 +159,16 @@ def test_lockout_after_repeated_failures(srv):
     for _ in range(6):
         call(base, "/login", json.dumps({"user": "tester", "password": "bad"}).encode(), J)
     assert call(base, "/login", json.dumps({"user": "tester", "password": pw}).encode(), J)[0] == 401              # locked for a minute
+
+
+def test_stats_time_range_is_not_stretched_by_stray_old_or_future_events():
+    from layered_nids.dashboard.server import _stats
+    alerts = [{"host": "a", "ts": 1_000_000.0, "severity": "high", "layers": {"rules": 1.0}}, {"host": "a", "ts": 1_003_600.0, "severity": "low", "layers": {"rules": 1.0}}]
+    events = [{"layer": "rules", "host": "a", "ts": 1_000_500.0, "detail": {"trail": "scan"}},
+              {"layer": "rules", "host": "b", "ts": 1_554_395_000.0, "detail": {"trail": "vertical_scan"}}]          # years later (an uploaded old file)
+    st = _stats(alerts, events)
+    assert st["t0"] == 1_000_000.0 and st["t1"] == 1_003_600.0              # the range comes from the alerts and the events near them
+    assert sum(b["events"] for b in st["hist"]) == 1                        # the stray event is not drawn on the time chart
+    assert {r["rule"] for r in st["rules"]} == {"scan", "vertical_scan"}    # but it is still counted by rule
+    only_events = _stats([], events)                                        # without alerts nothing is dropped
+    assert only_events["t1"] == 1_554_395_000.0

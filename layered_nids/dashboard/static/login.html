@@ -3,11 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NIDS - sign in</title>
+<title>Sign in - NIDS</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#070a14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.500-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="login-body">
+<noscript><p class="noscript">This page needs JavaScript to sign in.</p></noscript>
 <canvas id="net" aria-hidden="true"></canvas>
 <div class="login-grid">
   <section class="hero-side">
@@ -15,20 +18,19 @@
       <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-2)"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="var(--accent-text)" stroke-width="2.2" stroke-linejoin="round"/></svg>
       <div>NIDS</div>
     </div>
-    <h1 class="hero-h">See the whole network<br><span class="grad">before it sees you.</span></h1>
-    <p class="hero-p">Layered intrusion detection: a packet anomaly model, signatures and behaviour rules, and a flow classifier &mdash; fused into one alert per host.</p>
+    <h1 class="hero-h">Layered network<br><span class="grad">intrusion detection.</span></h1>
+    <p class="hero-p">A packet anomaly model, signature and behaviour rules, and a flow classifier, fused into one alert per host.</p>
     <ul class="chips">
       <li><i style="background:var(--c-packets)"></i>Packet anomaly model</li>
       <li><i style="background:var(--c-rules)"></i>Signatures &amp; rules</li>
       <li><i style="background:var(--c-flows)"></i>Flow model</li>
     </ul>
-    <div class="status-line"><span class="dot"></span> Local sensor data &middot; this page is reachable from this computer only</div>
   </section>
 
   <section class="card-side">
     <form class="login" id="f" autocomplete="on" novalidate>
       <h2>Sign in</h2>
-      <p class="login-sub">Use the account created with <span class="mono">--init-user</span>.</p>
+      <p class="login-sub">Use your account to continue.</p>
       <label for="u">User</label>
       <input id="u" autocomplete="username" required autofocus spellcheck="false">
       <label for="p">Password</label>
@@ -41,7 +43,7 @@
       <div class="caps" id="caps" hidden>Caps Lock is on</div>
       <button class="btn" type="submit" id="go"><span id="go-t">Sign in</span><i class="spin" aria-hidden="true"></i></button>
       <div class="err" id="e" role="alert"></div>
-      <div class="login-foot"><span>Session cookie &middot; locks after 5 wrong tries</span><button type="button" id="theme" class="linklike">Theme</button></div>
+      <div class="login-foot"><button type="button" id="theme" class="linklike">Theme</button></div>
     </form>
   </section>
 </div>

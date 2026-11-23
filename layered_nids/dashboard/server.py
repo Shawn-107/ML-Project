@@ -87,14 +87,19 @@ def _filter(rows, q: dict, host_key="host", text_keys=("host", "reason")):
 
 def _stats(alerts: list, events: list, bins: int = 48) -> dict:
     """Numbers for the overview charts: alerts over time by severity, busiest hosts, evidence share per layer, events per rule."""
-    ts = [float(r.get("ts", 0)) for r in alerts] + [float(r.get("ts", 0)) for r in events]
+    a_ts = [float(r.get("ts", 0)) for r in alerts]
+    if a_ts:                                       # events far outside the alerts' time range (e.g. an uploaded old file) must not stretch the chart
+        near = [r for r in events if min(a_ts) - 86400 <= float(r.get("ts", 0)) <= max(a_ts) + 86400]
+    else:
+        near = events
+    ts = a_ts + [float(r.get("ts", 0)) for r in near]
     t0, t1 = (min(ts), max(ts)) if ts else (0.0, 0.0)
     width = max((t1 - t0) / bins, 1.0)
     hist = [{"t0": t0 + i * width, "t1": t0 + (i + 1) * width, "critical": 0, "high": 0, "medium": 0, "low": 0, "events": 0, "signatures": 0} for i in range(bins)]
     for r in alerts:
         i = min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)
         hist[i][r.get("severity", "low") if r.get("severity") in SEVERITY_ORDER else "low"] += 1
-    for r in events:
+    for r in near:
         b = hist[min(int((float(r.get("ts", 0)) - t0) // width), bins - 1)]
         b["events"] += 1
         b["signatures"] += 1 if (r.get("detail") or {}).get("signature") else 0
