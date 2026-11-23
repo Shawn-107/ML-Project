@@ -2,6 +2,7 @@
 
    python -m layered_nids.anomaly.benchmark --stage validate     # choose between our own variants (validation injections)
    python -m layered_nids.anomaly.benchmark --stage test         # final numbers (different injections, 3 model seeds)
+   python -m layered_nids.anomaly.benchmark --stage fresh        # brand-new injection seeds (500+) and model seeds (50+), nothing tuned on them
 
 Data: the first 52 minutes of the Mirai capture (the paper's clean period), split in time order 60/20/20:
 train / calibration (threshold, tail) / hold. Synthetic attacks (see inject.py) are merged into the HOLD part only.
@@ -180,7 +181,7 @@ def summarise(all_rows: list) -> dict:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["validate", "test"], required=True)
+    ap.add_argument("--stage", choices=["validate", "test", "fresh"], required=True)
     ap.add_argument("--models", default=None, help="comma list; default: all variants (validate) or v1,original,<best v2> (test)")
     ap.add_argument("--model-seeds", type=int, default=None)
     ap.add_argument("--n-inj", type=int, default=None, help="number of injection seeds (default 2 for validate, 3 for test)")
@@ -189,23 +190,24 @@ def main(argv=None):
     train, calib, hold = load_clean()
     print(f"packets: train {len(train):,} | calibration {len(calib):,} | hold {len(hold):,}", flush=True)
     n_inj = a.n_inj or (2 if a.stage == "validate" else 3)
-    inj = list(range(100, 100 + n_inj)) if a.stage == "validate" else list(range(n_inj))
+    inj = list(range(100, 100 + n_inj)) if a.stage == "validate" else (list(range(500, 500 + n_inj)) if a.stage == "fresh" else list(range(n_inj)))   # fresh: injection seeds never used in development
     mseeds = range(a.model_seeds or (1 if a.stage == "validate" else 3))
+    ms_base = 50 if a.stage == "fresh" else 0                       # fresh: model seeds never used either
     names = a.models.split(",") if a.models else (list(VARIANTS) if a.stage == "validate" else ["nids_v1"])
     results = {}
     for name in names:
         rows, t0 = [], time.time()
         for ms in mseeds:
             if name in VARIANTS:
-                m = Own(name, ms, **VARIANTS[name])
+                m = Own(name, ms_base + ms, **VARIANTS[name])
             elif name == "reference_detector":                 # comparison only: needs a LOCAL file that is never committed
                 try:
                     from layered_nids.anomaly._reference_original import Original
                 except ImportError:
                     raise SystemExit("the original-detector column needs the local, git-ignored _reference_original.py")
-                m = Original(ms)
+                m = Original(ms_base + ms)
             elif name == "nids_v1":
-                m = First(ms)
+                m = First(ms_base + ms)
             else:
                 raise SystemExit(f"unknown model {name}")
             m.fit(train, calib)

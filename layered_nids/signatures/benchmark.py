@@ -1,6 +1,7 @@
 """Signature layer on the injection benchmark (see anomaly/inject.py), plus false alerts on real normal traffic.
 
-   python -m layered_nids.signatures.benchmark
+   python -m layered_nids.signatures.benchmark            # injection seeds 0-2
+   python -m layered_nids.signatures.benchmark --fresh    # injection seeds 500-504, never used in development; writes benchmark_fresh.json
 
 Count thresholds are calibrated on the first 80% of the 52-minute clean period of the Mirai capture (no attack data
 looked at); the last 20% is the hold stretch: false alerts are counted there without injections, then the attacks are merged in.
@@ -9,6 +10,7 @@ An attack is detected when the rules emit evidence for the attacker host in a wi
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter
 
 from layered_nids.anomaly.benchmark import load_clean
@@ -29,7 +31,8 @@ def main():
     res = {"calibrated": {k: v for k, v in cfg.__dict__.items() if not isinstance(v, tuple)}, "clean_hold_evidence": dict(by), "clean_hours": clean_hours, "kinds": {}}
     det = {k: [] for k in kinds}
     fp_inj = []
-    for seed in (0, 1, 2):
+    fresh = "--fresh" in sys.argv
+    for seed in (range(500, 505) if fresh else (0, 1, 2)):
         stream, labels, episodes = inject(hold, kinds, seed=seed)
         ev = scan(stream, cfg)
         for ep in episodes:
@@ -42,7 +45,7 @@ def main():
         res["kinds"][k] = {"detected": n, "of": len(det[k]), "rules": dict(by_rule)}
         print(f"  {k:12s} detected {n} of {len(det[k])} injections   by {dict(by_rule)}")
     res["evidence_outside_episodes_per_injection_run"] = fp_inj
-    out = REPORTS / "signatures" / "benchmark.json"
+    out = REPORTS / "signatures" / ("benchmark_fresh.json" if fresh else "benchmark.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=1, default=float))
     print("wrote", out)
