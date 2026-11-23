@@ -36,6 +36,12 @@ STATE = ROOT / "local"
 COOKIE = "nids_session"
 PUBLIC_ASSETS = ("/static/style.css", "/static/login.js")          # nothing else is served without a session
 MAX_JSON = 5_000_000
+FAVICON = (b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='#4f46e5'/>"
+           b"<path d='M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.2' stroke-linejoin='round'/></svg>")
+NOT_FOUND = (b'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+             b'<title>Page not found - NIDS</title><link rel="stylesheet" href="/static/style.css"></head><body><main style="max-width:560px;margin:80px auto;padding:0 24px">'
+             b'<h1>Page not found</h1><p class="sub">That address does not exist.</p>'
+             b'<p><a class="btn" style="display:inline-block;text-decoration:none" href="/">Back to the dashboard</a></p></main></body></html>')
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 SEVERITY_ORDER = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
@@ -178,10 +184,15 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, 
                 raise ValueError(f"body must be 1..{limit} bytes")
             return self.rfile.read(n)
 
+        def _not_found(self):
+            if urlparse(self.path).path.startswith(("/api/", "/nids/api/")):
+                return self._json(404, {"error": "not found"})
+            self._send(404, NOT_FOUND, "text/html; charset=utf-8")
+
         def _static(self, root: Path, rel: str):
             p = (root / rel).resolve()
             if not p.is_relative_to(root.resolve()) or not p.is_file():
-                return self._json(404, {"error": "not found"})
+                return self._not_found()
             self._send(200, p.read_bytes(), mimetypes.guess_type(p.name)[0] or "application/octet-stream")
 
         # -------------------------------------------------------------------------------------------- routing
@@ -203,6 +214,8 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, 
                 return self._json(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800")])
             if method == "GET" and path in PUBLIC_ASSETS:                  # the sign-in page needs its own style and script before anyone is signed in
                 return self._static(STATIC, path[len("/static/"):])
+            if method == "GET" and path == "/favicon.ico":
+                return self._send(200, FAVICON, "image/svg+xml")
             user = sessions.user(self._token())
             if path == "/logout" and method == "POST":
                 sessions.logout(self._token())
@@ -233,7 +246,7 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, 
                 return self._nids(method, path[len("/nids/api/"):], q)
             if path.startswith("/api/"):
                 return self._flow_api(method, path, q)
-            self._json(404, {"error": "not found"})
+            self._not_found()
 
         # -------------------------------------------------------------------------------------------- dashboard API
         def _nids(self, method, name, q):
@@ -348,7 +361,7 @@ def make_handler(data: Data, sessions: Sessions, state: Path, get_flow_service, 
     return Handler
 
 
-def make_server(host: str, port: int, data_dir: Path, state: Path = STATE, capture=None) -> ThreadingHTTPServer:
+def make_server(host: str, port: int, data_dir: Path, state: Path = STATE, capture=None, preload: bool = False) -> ThreadingHTTPServer:
     if host not in LOOPBACK:
         raise SystemExit(f"refusing to listen on {host!r}: the dashboard is for this computer only (use 127.0.0.1)")
     state = Path(state)
@@ -378,7 +391,15 @@ def make_server(host: str, port: int, data_dir: Path, state: Path = STATE, captu
         from layered_nids.dashboard.live_capture import CaptureManager
         capture = CaptureManager(state)
     handler = make_handler(Data(data_dir, state), Sessions(users), state, flow_service, capture)
-    return ThreadingHTTPServer((host, port), handler)
+    srv = ThreadingHTTPServer((host, port), handler)
+    if preload:                                                        # load the flow model now, so the first visit to /app/ is not slow
+        def warm():
+            try:
+                flow_service()
+            except Exception:
+                pass
+        threading.Thread(target=warm, daemon=True).start()
+    return srv
 
 
 def main(argv=None) -> int:
@@ -397,7 +418,7 @@ def main(argv=None) -> int:
         create_user(state / "users.json", a.init_user, state / "PASSWORD.txt")
         print(f"user '{a.init_user}' created; the password is in {state / 'PASSWORD.txt'}")
         return 0
-    srv = make_server(a.host, a.port, Path(a.data), Path(a.state))
+    srv = make_server(a.host, a.port, Path(a.data), Path(a.state), preload=True)
     print(f"NIDS dashboard on http://{a.host}:{a.port}   data: {a.data}   (Ctrl+C to stop)", flush=True)
     try:
         srv.serve_forever()

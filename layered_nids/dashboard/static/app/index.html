@@ -4,12 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Network Intrusion Detector</title>
+    <title>Flow analysis - NIDS</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f46e5'/%3E%3Cpath d='M16 6l9 4v6c0 5-4 8.5-9 10-5-1.500-9-5-9-10v-6z' fill='none' stroke='white' stroke-width='2.200' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <script type="module" crossorigin src="./assets/index-nKKlqnia.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-CH_-gYsz.css">
+    <link rel="stylesheet" href="/static/nids-bar.css">
   </head>
   <body>
+    <nav id="nids-bar" aria-label="NIDS sections">
+      <a class="b" href="/#/overview"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#4f46e5"/><path d="M16 6l9 4v6c0 5-4 8.5-9 10-5-1.5-9-5-9-10v-6z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/></svg><span>NIDS</span></a>
+      <div class="t"><a href="/#/overview">Overview</a><a href="/#/alerts">Alerts</a><a href="/#/events">Events</a><a href="/#/upload">Upload</a><a href="/#/live">Live capture</a><a class="on" href="/app/" aria-current="page">Flow analysis</a></div>
+      <button type="button" id="nids-out">Sign out</button>
+    </nav>
     <div id="root"></div>
+    <script src="/static/nids-bar.js"></script>
   </body>
 </html>

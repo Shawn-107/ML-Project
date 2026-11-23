@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <noscript><p class="noscript">This dashboard needs JavaScript.</p></noscript>
 <header>
   <div class="brand">
@@ -22,17 +23,17 @@
     <a href="#/events" data-v="events">Events</a>
     <a href="#/upload" data-v="upload">Upload</a>
     <a href="#/live" data-v="live">Live capture</a>
+    <a href="/app/">Flow analysis</a>
   </nav>
   <span class="spacer"></span>
   <button class="hbtn hide-m" id="kbtn" title="Search and commands">Search <kbd>Ctrl K</kbd></button>
-  <button class="hbtn live on" id="live" title="Refresh automatically when the data changes"><span class="pulse"></span><span id="live-t">Live</span></button>
-  <button class="hbtn" id="src" title="Which data the Overview, Alerts and Events pages show">Data: Recorded</button>
-  <a class="hbtn hide-s" href="/app/">Flow analysis &#8599;</a>
+  <button class="hbtn live on" id="live" title="Refresh the page data automatically when it changes"><span class="pulse"></span><span id="live-t">Auto-refresh</span></button>
+  <button class="hbtn" id="src" title="Switch between the recorded capture and your live captures (Overview, Alerts and Events)"><span class="lbl">Data: </span><span id="src-t">Recorded</span></button>
   <button class="hbtn" id="theme" title="Switch light or dark">Theme</button>
   <button class="hbtn" id="out">Sign out</button>
 </header>
 
-<main>
+<main id="main">
   <div id="live-note" hidden></div>
   <section class="view" id="v-overview">
     <div class="hero">
@@ -40,9 +41,9 @@
     </div>
     <div class="kpis" id="kpis"></div>
     <div class="grid">
-      <div class="card span-8 rise" style="--i:4"><div class="card-h"><h2>Alerts over time</h2><span class="hint">UTC &middot; by severity &middot; hover for detail</span></div><div id="ch-time"></div><div class="legend" id="lg-time"></div></div>
+      <div class="card span-8 rise" style="--i:4"><div class="card-h"><h2>Alerts over time</h2><span class="hint">Times in UTC</span></div><div id="ch-time"></div><div class="legend" id="lg-time"></div></div>
       <div class="card span-4 rise" style="--i:5"><div class="card-h"><h2>Severity</h2></div><div id="ch-sev" class="donut-wrap"></div></div>
-      <div class="card span-6 rise" style="--i:6"><div class="card-h"><h2>Host map</h2><span class="hint">size = alerts &middot; colour = worst severity &middot; click a host</span></div><div id="ch-map"></div></div>
+      <div class="card span-6 rise" style="--i:6"><div class="card-h"><h2>Host map</h2><span class="hint">Bigger = more alerts &middot; click a host</span></div><div id="ch-map"></div></div>
       <div class="card span-6 rise" style="--i:7"><div class="card-h"><h2>Busiest hosts</h2><span class="hint">alerts &middot; rule events</span></div><div id="ch-hosts" class="bars"></div></div>
       <div class="card span-6 rise" style="--i:8"><div class="card-h"><h2>Where the evidence comes from</h2><span class="hint">share of alert evidence</span></div><div id="ch-layers" class="bars"></div></div>
       <div class="card span-6 rise" style="--i:9"><div class="card-h"><h2>Rule events by rule</h2><span class="hint">red = signature &middot; amber = heuristic</span></div><div id="ch-rules" class="bars"></div></div>
@@ -51,7 +52,7 @@
   </section>
 
   <section class="view" id="v-alerts" hidden>
-    <h1>Alerts</h1><p class="sub">One line per host and time window where the evidence added up. Click a row for the host's timeline.</p>
+    <h1>Alerts</h1><p class="sub">Hosts the detectors flagged, newest first. Click a row for that host's timeline.</p>
     <div class="card" style="padding:0">
       <div class="toolbar">
         <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="aq" placeholder="Search host or reason  ( / )" aria-label="search alerts"></div>
@@ -64,7 +65,7 @@
   </section>
 
   <section class="view" id="v-events" hidden>
-    <h1>Rule events</h1><p class="sub">What the signature and heuristic rules saw. Signatures are known-bad patterns; heuristics are behaviour rules and can fire on odd but harmless traffic.</p>
+    <h1>Rule events</h1><p class="sub">What the rules saw. Signatures match known attack patterns; heuristics flag unusual behaviour and can fire on harmless traffic.</p>
     <div class="card" style="padding:0">
       <div class="toolbar">
         <div class="search grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="eq" placeholder="Search host, rule or reason" aria-label="search events"></div>
@@ -77,7 +78,7 @@
   </section>
 
   <section class="view" id="v-upload" hidden>
-    <h1>Upload a flow file</h1><p class="sub">UNSW-NB15 (34 columns), NetFlow v2 (40 columns) or Argus flow files. The format is detected from the columns. Up to 100 MB; the file is deleted after analysis.</p>
+    <h1>Upload a flow file</h1><p class="sub">Score a flow file with the flow model. UNSW-NB15, NetFlow v2 and Argus formats are detected automatically. Up to 100 MB; the file is deleted after analysis.</p>
     <div class="card">
       <label class="drop" id="drop"><input type="file" id="file" accept=".csv,.tsv,.txt,.binetflow"><b id="drop-t">Drop a file here or click to choose</b><span id="drop-s">.csv, .tsv, .binetflow</span></label>
       <div class="upload-row">
@@ -90,11 +91,11 @@
 
   <section class="view" id="v-live" hidden>
     <h1>Live capture</h1>
-    <p class="sub">Capture this computer's own network traffic for a short time and check it with the signature and heuristic rules. The findings appear under <b>Data: Live</b>.</p>
+    <p class="sub">Record this computer's network traffic for a short time and check it against the signature and behaviour rules. Findings appear under <b>Data: Live captures</b>.</p>
     <div class="card">
       <div id="cap-net"></div>
       <label class="check" id="ack-box" hidden><input type="checkbox" id="ack"><span>I understand this network is not marked Private, and I am allowed to capture here.</span></label>
-      <label class="check"><input type="checkbox" id="cap-test"><span>Send one harmless test request during the capture: a fake attack aimed at example.com (a public test domain) that the rules should flag. It lets you see a finding appear. Off by default.</span></label>
+      <label class="check"><input type="checkbox" id="cap-test"><span>Include a harmless test request (a fake attack sent to example.com) so a finding appears.</span></label>
       <div class="upload-row">
         <label class="field">Seconds <input type="number" id="cap-s" min="5" max="120" value="20"></label>
         <button class="btn" id="cap-go">Start capture</button>
@@ -103,16 +104,15 @@
       <div id="cap-status"></div>
       <div id="cap-hist"></div>
     </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-h"><h2>What this does and does not do</h2></div>
-      <ul class="plain">
-        <li>Windows shows an approval prompt for every capture. Nothing is captured until you click Yes.</li>
-        <li>Up to 120 seconds and 200,000 packets. The capture file is deleted right after the check; only the findings are kept.</li>
-        <li>Only the rules layer runs: known attack patterns and behaviour rules. The packet anomaly model needs about 70,000 clean packets of the same network to learn, so a short capture cannot feed it.</li>
-        <li>Only your own computer's traffic and what reaches it. Do not use it on networks where you have no right to record.</li>
-        <li>Nothing leaves this computer.</li>
+    <details class="card help">
+      <summary>How live capture works</summary>
+      <ul>
+        <li>Windows asks for approval before every capture. Nothing is recorded until you click Yes.</li>
+        <li>A capture lasts up to 120 seconds. The recording is deleted right after it is checked; only the findings are kept, on this computer.</li>
+        <li>Live traffic is checked by the signature and behaviour rules. The anomaly model needs a longer baseline of the same network.</li>
+        <li>Only capture networks you are allowed to monitor.</li>
       </ul>
-    </div>
+    </details>
   </section>
 </main>
 

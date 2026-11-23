@@ -336,7 +336,7 @@
     var a = [["▦", "Overview", "page", function () { location.hash = "#/overview"; }], ["⚠", "Alerts", "page", function () { location.hash = "#/alerts"; }],
              ["☰", "Rule events", "page", function () { location.hash = "#/events"; }], ["↑", "Upload a flow file", "page", function () { location.hash = "#/upload"; }], ["◉", "Live capture", "page", function () { location.hash = "#/live"; }],
              ["↗", "Flow analysis app", "page", function () { location.href = "/app/"; }], ["◐", "Toggle light / dark theme", "command", toggleTheme],
-             ["●", "Turn live refresh on or off", "command", toggleLive], ["⇥", "Sign out", "command", signOut]];
+             ["●", "Turn auto-refresh on or off", "command", toggleLive], ["⇥", "Sign out", "command", signOut]];
     if (STATS) STATS.top_hosts.forEach(function (h) { a.push(["◎", "Host " + h.host, h.alerts + " alerts", function () { openHost(h.host); }]); });
     return a;
   }
@@ -366,11 +366,11 @@
   // ------------------------------------------------------------------------------------------------ live refresh
   var liveOn = true, liveTimer = null;
   function setLive(on) {
-    liveOn = on; var b = document.getElementById("live"); b.classList.toggle("on", on); document.getElementById("live-t").textContent = on ? "Live" : "Paused";
+    liveOn = on; var b = document.getElementById("live"); b.classList.toggle("on", on); document.getElementById("live-t").textContent = on ? "Auto-refresh" : "Paused";
     clearInterval(liveTimer); if (on) liveTimer = setInterval(poll, 8000);
     try { localStorage.setItem("nids-live", on ? "1" : "0"); } catch (e) { /* ignore */ }
   }
-  function toggleLive() { setLive(!liveOn); toast(liveOn ? "Live refresh on" : "Live refresh paused"); }
+  function toggleLive() { setLive(!liveOn); toast(liveOn ? "Auto-refresh on" : "Auto-refresh paused"); }
   function poll() {
     if (document.hidden) return;
     api("/nids/api/summary").then(function (s) {
@@ -397,6 +397,11 @@
     if (r.caution) box.appendChild(el("div", "notice info", r.caution));
     var d = el("div", "upload-row");
     (r.downloads || []).forEach(function (k) { var a = el("a", "btn ghost", "Download " + k + ".csv"); a.href = "/nids/api/download?id=" + encodeURIComponent(r.id) + "&kind=" + encodeURIComponent(k); d.appendChild(a); });
+    if (r.events_added > 0) { var ve = el("button", "btn", "View the events"); ve.addEventListener("click", function () { setSrc("recorded"); location.hash = "#/events"; }); d.appendChild(ve); }
+    else if (r.flagged != null) {
+      box.appendChild(el("div", "notice info", "This file has no host addresses, so no host events were added to the dashboard. The flagged flows are in the downloaded file; Flow analysis lets you explore flows one by one."));
+      var fa = el("a", "btn", "Open Flow analysis"); fa.href = "/app/#/analyse"; d.appendChild(fa);
+    }
     box.appendChild(d);
     toast("Analysed " + r.rows + " rows: " + (r.flagged != null ? r.flagged + " flagged" : r.findings + " findings"));
     loaded.overview = false; loaded.events = false; LAST_COUNT = -1; status();
@@ -418,7 +423,7 @@
   function capHeaders() { return { "X-NIDS-Capture": "1", "Content-Type": "application/json" }; }
   function setSrc(v) {
     SRC = v; try { localStorage.setItem("nids-src", v); } catch (e) { /* ignore */ }
-    var b = document.getElementById("src"); b.textContent = "Data: " + (v === "live" ? "Live captures" : "Recorded"); b.classList.toggle("src-live", v === "live");
+    var b = document.getElementById("src"); document.getElementById("src-t").textContent = v === "live" ? "Live captures" : "Recorded"; b.classList.toggle("src-live", v === "live");
     loaded = {}; LAST_COUNT = -1; status(); route();
   }
   function capRender(st) {
@@ -435,7 +440,7 @@
     } else if (job.state === "done") {
       var tiles = el("div", "tiles"); tile(tiles, job.packets, "packets captured"); tile(tiles, job.events, "rule events"); tile(tiles, job.alerts, "alerts"); tile(tiles, job.signature_hits, "signature hits");
       box.appendChild(tiles); box.appendChild(el("div", "notice info", job.message));
-      var row = el("div", "upload-row"), go = el("button", "btn", "Show live results"); go.addEventListener("click", function () { setSrc("live"); location.hash = "#/overview"; }); row.appendChild(go); box.appendChild(row);
+      var row = el("div", "upload-row"), go = el("button", "btn", "View live results"); go.addEventListener("click", function () { setSrc("live"); location.hash = "#/overview"; }); row.appendChild(go); box.appendChild(row);
     } else if (job.state === "failed") {
       box.appendChild(el("div", "notice err", job.message));
     }
@@ -513,7 +518,7 @@
   document.getElementById("cap-go").addEventListener("click", capStart);
   document.getElementById("cap-clear").addEventListener("click", capClear);
   document.getElementById("src").addEventListener("click", function () { setSrc(SRC === "live" ? "recorded" : "live"); toast(SRC === "live" ? "Showing live captures" : "Showing recorded data"); });
-  (function () { var b = document.getElementById("src"); b.textContent = "Data: " + (SRC === "live" ? "Live captures" : "Recorded"); b.classList.toggle("src-live", SRC === "live"); })();
+  (function () { var b = document.getElementById("src"); document.getElementById("src-t").textContent = SRC === "live" ? "Live captures" : "Recorded"; b.classList.toggle("src-live", SRC === "live"); })();
   var drop = document.getElementById("drop"), file = document.getElementById("file");
   function picked() { var f = file.files[0]; document.getElementById("drop-t").textContent = f ? f.name : "Drop a file here or click to choose"; document.getElementById("drop-s").textContent = f ? (f.size / 1048576).toFixed(2) + " MB" : ".csv, .tsv, .binetflow"; }
   file.addEventListener("change", picked);
